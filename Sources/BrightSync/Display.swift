@@ -31,7 +31,12 @@ struct Display {
 
     @discardableResult
     func writeBrightness(_ value: Int) -> Bool {
-        ddckit_write(service, chipAddress, UInt8(DDCKIT_VCP_BRIGHTNESS), UInt16(max(0, value)))
+        write(DDCKIT_VCP_BRIGHTNESS, value)
+    }
+
+    @discardableResult
+    func write(_ vcp: Int32, _ value: Int) -> Bool {
+        ddckit_write(service, chipAddress, UInt8(vcp), UInt16(max(0, value)))
     }
 }
 

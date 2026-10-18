@@ -9,6 +9,7 @@ enum Preferences {
         static let interval = "intervalSeconds"
         static let enabled = "syncEnabled"
         static let deadband = "deadband"
+        static let syncColor = "syncColorTemperature"
     }
 
     static let intervalChoices = [2, 5, 10, 30, 60]
@@ -28,6 +29,14 @@ enum Preferences {
     static var isEnabled: Bool {
         get { defaults.object(forKey: Key.enabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.enabled) }
+    }
+
+    /// Mirrors the colour preset (VCP 0x14) as well as brightness. Off by
+    /// default: preset numbering is only nominally standard, so two vendors
+    /// may disagree about what a given preset means.
+    static var syncColorTemperature: Bool {
+        get { defaults.bool(forKey: Key.syncColor) }
+        set { defaults.set(newValue, forKey: Key.syncColor) }
     }
 
     /// Ignore differences at or below this many points, so that rounding

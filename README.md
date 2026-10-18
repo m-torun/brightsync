@@ -8,6 +8,7 @@ light sensor doing its thing, or the keyboard brightness keys only reaching one
 screen — and you want the rest of the desk to match.
 
 - One source display, any number of followers
+- Optionally mirrors the color preset (color temperature) as well
 - The source can be any connected display, not just the main one
 - Checks every 2–60 seconds (your choice)
 - Proportional, not literal: a panel whose range is 0–80 is set to the same
@@ -52,6 +53,30 @@ ACME 27  id=2  brightness=58/100
 Displays are remembered by EDID UUID, so your choice of source survives
 reboots and reconnection, where display IDs do not.
 
+## Color temperature
+
+**Sync color temperature** in the menu is off by default. When on, BrightSync
+also mirrors VCP `0x14` (select color preset) from the source.
+
+This is best-effort by nature, and worth understanding before relying on it:
+
+- A color preset is an *enumerated* value, so it is copied verbatim rather
+  than scaled the way brightness is.
+- Preset numbering is only nominally standard (`0x05` is 6500K, `0x08` is
+  9300K, and so on). Vendors deviate, so the same number can mean different
+  things on two monitors.
+- Preset lists are often **sparse**. A display may ignore a value it does not
+  implement, or silently substitute another one — in testing, one monitor
+  accepted presets 5 and 8, ignored 4, and turned 6 into 1.
+
+BrightSync therefore reads the value back after writing it. If the display
+did not take it, that value is remembered as unsupported for that display and
+is not written again, so an unsupported preset cannot cause an endless rewrite
+loop. Reconnecting a display clears those memories.
+
+Note that on some monitors each color preset carries its own brightness, so
+changing the preset can change brightness too.
+
 ## How it works
 
 Each tick, BrightSync reads VCP feature `0x10` (brightness) from the source,
@@ -66,7 +91,8 @@ All DDC traffic runs on a background queue; a single read takes roughly 150 ms.
 ## Settings and privacy
 
 Settings are stored in your own `UserDefaults` under
-`app.brightsync.BrightSync` (source display, interval, enabled, deadband).
+`app.brightsync.BrightSync` (source display, interval, enabled, deadband,
+color temperature syncing).
 Nothing is written into this repository, and the app makes no network requests.
 
 ## Notes and limits

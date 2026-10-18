@@ -14,6 +14,7 @@
 #define DDCKIT_MAX_DISPLAYS 8
 #define DDCKIT_VCP_BRIGHTNESS 0x10
 #define DDCKIT_VCP_CONTRAST 0x12
+#define DDCKIT_VCP_COLOR_PRESET 0x14
 
 typedef struct {
     unsigned int displayID;

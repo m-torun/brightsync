@@ -43,7 +43,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(disabledItem(message))
         }
         for reading in status.readings {
-            let value = reading.percent.map { "\($0)%" } ?? "unreadable"
+            var value = reading.percent.map { "\($0)%" } ?? "unreadable"
+            if let preset = reading.colorPreset {
+                value += " · \(ColorPreset.describe(preset))"
+            }
             let label = reading.isSource ? "\(reading.name) — \(value)  (source)"
                                          : "\(reading.name) — \(value)"
             menu.addItem(disabledItem(label))
@@ -58,6 +61,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toggle.target = self
         toggle.state = Preferences.isEnabled ? .on : .off
         menu.addItem(toggle)
+
+        let colorToggle = NSMenuItem(title: "Sync color temperature", action: #selector(toggleColor), keyEquivalent: "")
+        colorToggle.target = self
+        colorToggle.state = Preferences.syncColorTemperature ? .on : .off
+        colorToggle.toolTip = "Mirrors the color preset (VCP 0x14). Preset numbering is only nominally standard, so two vendors may disagree about what a preset means."
+        menu.addItem(colorToggle)
 
         menu.addItem(submenu(title: "Source display", items: sourceItems()))
         menu.addItem(submenu(title: "Check every", items: intervalItems()))
@@ -124,6 +133,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleEnabled() {
         Preferences.isEnabled.toggle()
+        engine.syncNow()
+    }
+
+    @objc private func toggleColor() {
+        Preferences.syncColorTemperature.toggle()
         engine.syncNow()
     }
 

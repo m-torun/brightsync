@@ -1,0 +1,5 @@
+.build/
+BrightSync.app/
+*.dSYM/
+.DS_Store
+.swiftpm/

@@ -10,6 +10,7 @@ enum Preferences {
         static let enabled = "syncEnabled"
         static let deadband = "deadband"
         static let syncColor = "syncColorTemperature"
+        static let useKeys = "useBrightnessKeys"
     }
 
     static let intervalChoices = [2, 5, 10, 30, 60]
@@ -29,6 +30,13 @@ enum Preferences {
     static var isEnabled: Bool {
         get { defaults.object(forKey: Key.enabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.enabled) }
+    }
+
+    /// Lets the keyboard's brightness keys drive the source display. Needs
+    /// Accessibility permission, so it is off until asked for.
+    static var useBrightnessKeys: Bool {
+        get { defaults.bool(forKey: Key.useKeys) }
+        set { defaults.set(newValue, forKey: Key.useKeys) }
     }
 
     /// Mirrors the colour preset (VCP 0x14) as well as brightness. Off by

@@ -5,6 +5,7 @@ import ServiceManagement
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let engine = SyncEngine()
+    private let keyboard = KeyboardMonitor()
     private var status = SyncStatus()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -18,6 +19,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         engine.onStatus = { [weak self] status in
             self?.status = status
+        }
+        keyboard.onBrightnessKey = { [weak self] fraction in
+            self?.engine.nudgeSource(by: fraction)
+        }
+        if Preferences.useBrightnessKeys {
+            keyboard.start()
         }
         engine.start()
 
@@ -61,6 +68,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toggle.target = self
         toggle.state = Preferences.isEnabled ? .on : .off
         menu.addItem(toggle)
+
+        // A grant given while we were running only takes effect on a fresh
+        // attempt, so retry here rather than making the user relaunch.
+        if Preferences.useBrightnessKeys {
+            keyboard.start()
+        }
+        let keysToggle = NSMenuItem(title: "Use brightness keys", action: #selector(toggleKeys), keyEquivalent: "")
+        keysToggle.target = self
+        keysToggle.state = Preferences.useBrightnessKeys ? .on : .off
+        if Preferences.useBrightnessKeys, !keyboard.isTrusted {
+            keysToggle.title = "Use brightness keys (needs permission)"
+        }
+        keysToggle.toolTip = "The brightness keys adjust the source display; the others follow. Requires Accessibility permission."
+        menu.addItem(keysToggle)
 
         let colorToggle = NSMenuItem(title: "Sync color temperature", action: #selector(toggleColor), keyEquivalent: "")
         colorToggle.target = self
@@ -134,6 +155,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleEnabled() {
         Preferences.isEnabled.toggle()
         engine.syncNow()
+    }
+
+    @objc private func toggleKeys() {
+        if Preferences.useBrightnessKeys {
+            Preferences.useBrightnessKeys = false
+            keyboard.stop()
+            return
+        }
+        Preferences.useBrightnessKeys = true
+        if keyboard.start() {
+            return
+        }
+        // tapCreate fails without Accessibility. Ask macOS first, so the app
+        // appears in the Accessibility list, then explain.
+        keyboard.requestTrust()
+        let alert = NSAlert()
+        alert.messageText = "BrightSync needs Accessibility permission"
+        alert.informativeText = """
+        The brightness keys are system media events, so watching them requires         Accessibility access.
+
+        Add BrightSync under Privacy & Security → Accessibility, then open this         menu again.
+        """
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func toggleColor() {

@@ -9,11 +9,13 @@ screen — and you want the rest of the desk to match.
 
 - One source display, any number of followers
 - Optionally mirrors the color preset (color temperature) as well
+- Optionally honors the keyboard's brightness keys
 - The source can be any connected display, not just the main one
 - Checks every 2–60 seconds (your choice)
 - Proportional, not literal: a panel whose range is 0–80 is set to the same
   *percentage*, not the same raw number
-- No Accessibility permission, no Dock icon, one small binary
+- No Dock icon, one small binary; no permissions at all unless you turn on the
+  brightness keys
 
 ## Requirements
 
@@ -52,6 +54,32 @@ ACME 27  id=2  brightness=58/100
 
 Displays are remembered by EDID UUID, so your choice of source survives
 reboots and reconnection, where display IDs do not.
+
+## Brightness keys
+
+**Use brightness keys** in the menu is off by default. When on, the keyboard's
+brightness keys adjust the *source* display, and the others follow — so one
+pair of keys drives the whole desk.
+
+This needs **Accessibility permission**. The brightness keys are not ordinary
+key presses but system-defined media events, and the only way to observe them
+is a CGEvent tap, which macOS refuses to create without that grant. Turning
+the option on asks for it and opens the right pane in System Settings; flip the
+switch for BrightSync, then open the menu again.
+
+The tap is listen-only: the key event is passed along untouched, so macOS still
+shows whatever on-screen feedback it normally would. One consequence is that
+another app watching the same keys — MonitorControl, for instance — will also
+act on them, and brightness will move in double steps. Run one or the other.
+
+Steps match macOS: a sixteenth of the range, or a sixty-fourth while holding
+Shift. Only the source display is written on each keystroke; propagation to the
+others is debounced, so holding a key down does not queue up a read and a write
+per display per keystroke.
+
+Note that an app's Accessibility grant is tied to the binary. If you rebuild
+BrightSync, macOS may treat it as a new app and you will have to toggle its
+switch off and on again.
 
 ## Color temperature
 
@@ -92,7 +120,7 @@ All DDC traffic runs on a background queue; a single read takes roughly 150 ms.
 
 Settings are stored in your own `UserDefaults` under
 `app.brightsync.BrightSync` (source display, interval, enabled, deadband,
-color temperature syncing).
+color temperature syncing, brightness keys).
 Nothing is written into this repository, and the app makes no network requests.
 
 ## Notes and limits

@@ -53,6 +53,9 @@ final class SyncEngine {
     /// or substitute a different one. Remember those so we do not rewrite the
     /// same rejected value on every tick.
     private var rejectedPresets: Set<String> = []
+    /// Last known source reading, so a key press need not wait on a DDC read.
+    private var cachedSource: (key: String, current: Int, max: Int)?
+    private var propagateTask: DispatchWorkItem?
 
     /// Called on the main queue whenever readings change.
     var onStatus: ((SyncStatus) -> Void)?
@@ -83,12 +86,48 @@ final class SyncEngine {
             self.store.refresh()
             self.lastWritten = [:]
             self.rejectedPresets = []
+            self.cachedSource = nil
             self.tick()
         }
     }
 
     func syncNow() {
         queue.async { self.tick() }
+    }
+
+    /// Moves the source display by a signed fraction of its own range.
+    ///
+    /// Only the source is written here — propagation to the other displays is
+    /// debounced, so holding a brightness key does not queue up a read and a
+    /// write per display per keystroke.
+    func nudgeSource(by fraction: Double) {
+        queue.async {
+            guard let source = self.source(from: self.store.displays) else { return }
+
+            let reading: (current: Int, max: Int)
+            if let cached = self.cachedSource, cached.key == source.key {
+                reading = (cached.current, cached.max)
+            } else if let fresh = source.readBrightness() {
+                reading = fresh
+            } else {
+                return
+            }
+
+            let step = max(1, Int((Double(reading.max) * abs(fraction)).rounded()))
+            let wanted = min(reading.max, max(0, reading.current + (fraction > 0 ? step : -step)))
+            guard wanted != reading.current, source.writeBrightness(wanted) else { return }
+
+            self.cachedSource = (source.key, wanted, reading.max)
+            self.lastWritten[self.cacheKey(source, DDCKIT_VCP_BRIGHTNESS)] = wanted
+            self.schedulePropagation()
+        }
+    }
+
+    private func schedulePropagation() {
+        propagateTask?.cancel()
+        let task = DispatchWorkItem { [weak self] in self?.tick() }
+        propagateTask = task
+        queue.asyncAfter(deadline: .now() + 0.4, execute: task)
     }
 
     /// Picks the configured source, falling back to the main display.
@@ -124,6 +163,8 @@ final class SyncEngine {
 
         // Only pay for the extra round trip when colour syncing is on.
         let sourceColor = Preferences.syncColorTemperature ? source.read(DDCKIT_VCP_COLOR_PRESET) : nil
+
+        cachedSource = (source.key, sourceBrightness.current, sourceBrightness.max)
 
         let sourcePercent = Int((Double(sourceBrightness.current) / Double(sourceBrightness.max) * 100).rounded())
         status.readings.append(DisplayReading(key: source.key, name: source.name, percent: sourcePercent,

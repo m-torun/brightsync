@@ -2,8 +2,9 @@ import Foundation
 
 /// Appends to ~/Library/Logs/BrightSync.log.
 ///
-/// DDC and keyboard taps fail in ways that are invisible from the outside, so
-/// the app keeps a plain text record of what it saw and did.
+/// DDC failures are invisible from the outside — a write is accepted and
+/// quietly ignored, a read returns noise — so the app keeps a plain text
+/// record of what it read and wrote.
 enum Log {
     private static let queue = DispatchQueue(label: "app.brightsync.log")
     private static let maxBytes = 512 * 1024

@@ -6,6 +6,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let engine = SyncEngine()
     private let keyboard = KeyboardMonitor()
+    private var keyboardHealthTimer: Timer?
     private var status = SyncStatus()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,8 +25,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.engine.nudgeSource(by: fraction)
         }
         if Preferences.useBrightnessKeys {
+            if !keyboard.isTrusted {
+                Log.write("launch: brightness keys wanted but not trusted; asking")
+                keyboard.requestTrust()
+            }
             keyboard.start()
         }
+        // Picks up a permission granted while running, and revives a tap the
+        // system has disabled. A no-op while everything is healthy.
+        keyboardHealthTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            guard let self, Preferences.useBrightnessKeys else { return }
+            self.keyboard.start()
+        }
+        Log.write("launch: BrightSync started, keys=\(Preferences.useBrightnessKeys)")
         engine.start()
 
         NotificationCenter.default.addObserver(
@@ -102,6 +114,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
+
+        let showLog = NSMenuItem(title: "Reveal log in Finder", action: #selector(revealLog), keyEquivalent: "")
+        showLog.target = self
+        menu.addItem(showLog)
 
         let quit = NSMenuItem(title: "Quit BrightSync", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -222,6 +238,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alert.informativeText = "\(error.localizedDescription)\n\nYou can also set this in System Settings → General → Login Items."
             alert.runModal()
         }
+    }
+
+    @objc private func revealLog() {
+        NSWorkspace.shared.selectFile(Log.path, inFileViewerRootedAtPath: "")
     }
 
     @objc private func quit() {

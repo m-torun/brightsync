@@ -32,8 +32,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature, so that "Start at login" and TCC see a stable identity.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "note: ad-hoc signing failed, app still runs"
+# Accessibility permission is bound to the code signature. An ad-hoc one
+# changes every build, so macOS sees a new app and forgets the grant; a
+# self-signed certificate keeps it stable. See ./make-dev-cert.sh.
+IDENTITY="BrightSync Dev"
+if security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
+    codesign --force --sign "$IDENTITY" "$APP" >/dev/null 2>&1 \
+        && echo "Signed with \"$IDENTITY\" (permissions survive rebuilds)" \
+        || echo "note: signing with \"$IDENTITY\" failed"
+else
+    codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+    echo "note: ad-hoc signed. Run ./make-dev-cert.sh so Accessibility"
+    echo "      permission survives rebuilds."
+fi
 
 echo "Built $APP"
 echo "Install with:  cp -R $APP /Applications/"

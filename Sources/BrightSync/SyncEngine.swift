@@ -102,7 +102,10 @@ final class SyncEngine {
     /// write per display per keystroke.
     func nudgeSource(by fraction: Double) {
         queue.async {
-            guard let source = self.source(from: self.store.displays) else { return }
+            guard let source = self.source(from: self.store.displays) else {
+                Log.write("nudge: no source display")
+                return
+            }
 
             let reading: (current: Int, max: Int)
             if let cached = self.cachedSource, cached.key == source.key {
@@ -110,12 +113,21 @@ final class SyncEngine {
             } else if let fresh = source.readBrightness() {
                 reading = fresh
             } else {
+                Log.write("nudge: could not read \(source.name)")
                 return
             }
 
             let step = max(1, Int((Double(reading.max) * abs(fraction)).rounded()))
             let wanted = min(reading.max, max(0, reading.current + (fraction > 0 ? step : -step)))
-            guard wanted != reading.current, source.writeBrightness(wanted) else { return }
+            guard wanted != reading.current else {
+                Log.write("nudge: already at \(wanted)/\(reading.max) on \(source.name)")
+                return
+            }
+            guard source.writeBrightness(wanted) else {
+                Log.write("nudge: write to \(source.name) failed")
+                return
+            }
+            Log.write("nudge: \(source.name) \(reading.current) -> \(wanted) of \(reading.max)")
 
             self.cachedSource = (source.key, wanted, reading.max)
             self.lastWritten[self.cacheKey(source, DDCKIT_VCP_BRIGHTNESS)] = wanted

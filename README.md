@@ -77,9 +77,16 @@ Shift. Only the source display is written on each keystroke; propagation to the
 others is debounced, so holding a key down does not queue up a read and a write
 per display per keystroke.
 
-Note that an app's Accessibility grant is tied to the binary. If you rebuild
-BrightSync, macOS may treat it as a new app and you will have to toggle its
-switch off and on again.
+An app's Accessibility grant is tied to its code signature, and an ad-hoc
+signature changes with every build — so macOS sees each rebuild as a new app
+and forgets the permission. Run `./make-dev-cert.sh` once to create a
+self-signed certificate; `build.sh` then signs with it and the grant survives
+rebuilds.
+
+There is also a log at `~/Library/Logs/BrightSync.log` (**Reveal log in
+Finder** in the menu), which records key presses it saw and brightness changes
+it made. A tap that macOS disables is rebuilt automatically within a few
+seconds.
 
 ## Color temperature
 

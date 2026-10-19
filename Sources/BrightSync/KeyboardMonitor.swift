@@ -31,9 +31,20 @@ final class KeyboardMonitor {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    /// Safe to call repeatedly: it is a no-op while the tap is healthy, and
+    /// rebuilds it when macOS has disabled it or when trust has just arrived.
     @discardableResult
     func start() -> Bool {
-        guard tap == nil else { return true }
+        if let existing = tap {
+            if CGEvent.tapIsEnabled(tap: existing) {
+                return true
+            }
+            Log.write("keyboard: tap was disabled, rebuilding it")
+            stop()
+        }
+        guard AXIsProcessTrusted() else {
+            return false // creating a tap untrusted yields a permanently dead one
+        }
         let mask = CGEventMask(1 << 14) // NX_SYSDEFINED
 
         guard let tap = CGEvent.tapCreate(
@@ -48,14 +59,25 @@ final class KeyboardMonitor {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            return false // no Accessibility permission
+            Log.write("keyboard: tapCreate failed (no Accessibility permission?)")
+            return false
         }
 
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         self.tap = tap
         self.runLoopSource = source
-        return true
+
+        // A tap can be created and yet arrive disabled when the permission is
+        // stale — typically after a rebuild, since an ad-hoc signature's
+        // identity changes with every build.
+        var enabled = CGEvent.tapIsEnabled(tap: tap)
+        if !enabled {
+            CGEvent.tapEnable(tap: tap, enable: true)
+            enabled = CGEvent.tapIsEnabled(tap: tap)
+        }
+        Log.write("keyboard: tap created, trusted=\(AXIsProcessTrusted()) enabled=\(enabled)")
+        return enabled
     }
 
     func stop() {
@@ -65,6 +87,9 @@ final class KeyboardMonitor {
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
+        if let tap {
+            CFMachPortInvalidate(tap) // otherwise a dead tap lingers in the session
+        }
         tap = nil
         runLoopSource = nil
     }
@@ -73,9 +98,13 @@ final class KeyboardMonitor {
         // The system disables a tap whose callback is too slow; ours only
         // dispatches, but re-enable defensively rather than go deaf.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            Log.write("keyboard: system disabled the tap (\(type.rawValue)); re-enabling")
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return Unmanaged.passUnretained(event)
         }
+        // This runs for every system-defined event, including mouse buttons.
+        // It must stay cheap: macOS disables a tap whose callback is slow, so
+        // nothing here touches the disk.
         guard let nsEvent = NSEvent(cgEvent: event),
               nsEvent.subtype.rawValue == Self.auxControlButtons else {
             return Unmanaged.passUnretained(event)
@@ -87,8 +116,9 @@ final class KeyboardMonitor {
         let isKeyDown = ((keyFlags & 0xFF00) >> 8) == 0x0A
 
         guard keyCode == Self.brightnessUp || keyCode == Self.brightnessDown else {
-            return Unmanaged.passUnretained(event)
+            return Unmanaged.passUnretained(event) // volume, mute, play/pause…
         }
+        Log.write("keyboard: brightness key code=\(keyCode) down=\(isKeyDown)")
         if isKeyDown {
             let fine = nsEvent.modifierFlags.contains(.shift)
             let magnitude = fine ? Self.fineStep : Self.step

@@ -23,7 +23,21 @@ screen — and you want the rest of the desk to match.
   Mac and monitor combinations even though writes succeed — if a display shows
   as `unreadable`, try connecting it over USB-C/Thunderbolt instead.
 
-## Build and install
+## Install
+
+```sh
+brew tap m-torun/tap
+brew install --cask brightsync
+```
+
+BrightSync is signed ad hoc rather than with an Apple Developer ID, so macOS
+blocks the first launch. Open it once with `open /Applications/BrightSync.app`,
+then allow it under System Settings → Privacy & Security → **Open Anyway**.
+
+Or [download the latest release](https://github.com/m-torun/brightsync/releases/latest)
+and drag `BrightSync.app` to Applications.
+
+### Building from source
 
 No Xcode needed, just the Swift toolchain that ships with the Command Line
 Tools:
@@ -33,6 +47,8 @@ Tools:
 cp -R BrightSync.app /Applications/
 open /Applications/BrightSync.app
 ```
+
+## Using it
 
 A sun icon appears in the menu bar. Open it to choose the source display, set
 the interval, pause syncing, or enable **Start at login**.

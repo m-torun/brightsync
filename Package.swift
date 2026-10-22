@@ -28,5 +28,10 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
             ]
         ),
+        .testTarget(
+            name: "BrightSyncTests",
+            dependencies: ["BrightSync"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

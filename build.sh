@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 CONFIG=${1:-release}
 APP="BrightSync.app"
-VERSION="1.0"
+VERSION="1.1"
 
 swift build -c "$CONFIG"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)/BrightSync"

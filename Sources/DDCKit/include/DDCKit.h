@@ -29,12 +29,23 @@ int ddckit_enumerate(DDCKitDisplay *out, int maxCount);
 
 void ddckit_release(void *service);
 
-// Reads a VCP feature. Returns false if the display did not answer with a
-// valid, checksum-correct reply for this feature.
-bool ddckit_read(void *service, unsigned int chipAddress, unsigned char vcp,
-                 unsigned short *current, unsigned short *max);
+typedef enum {
+    DDCKIT_OK = 0,
+    DDCKIT_UNSUPPORTED,  // the display answered: it has no such feature
+    DDCKIT_SEND_FAILED,  // the request could not be sent
+    DDCKIT_READ_FAILED,  // the reply could not be read
+    DDCKIT_BAD_REPLY,    // something came back, but not a valid answer
+} DDCKitResult;
 
-bool ddckit_write(void *service, unsigned int chipAddress, unsigned char vcp,
-                  unsigned short value);
+// Reads a VCP feature in a single attempt. There is deliberately no retry
+// loop: every transaction goes through the display coprocessor, so a caller
+// that wants another try should wait and come back later.
+DDCKitResult ddckit_read(void *service, unsigned int chipAddress, unsigned char vcp,
+                         unsigned short *current, unsigned short *max);
+
+// Sets a VCP feature. The display does not acknowledge a write, so success
+// only means the request went out.
+DDCKitResult ddckit_write(void *service, unsigned int chipAddress, unsigned char vcp,
+                          unsigned short value);
 
 #endif

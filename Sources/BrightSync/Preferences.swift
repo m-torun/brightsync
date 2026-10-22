@@ -12,7 +12,9 @@ enum Preferences {
         static let syncColor = "syncColorTemperature"
     }
 
-    static let intervalChoices = [2, 5, 10, 30, 60]
+    /// How often the source display is read. Every read goes through the
+    /// display coprocessor, so the floor is deliberately not lower.
+    static let intervalChoices = [10, 30, 60, 120]
 
     /// Identity of the display whose brightness the others follow. Nil means
     /// "whichever display macOS considers the main one".
@@ -22,7 +24,7 @@ enum Preferences {
     }
 
     static var interval: Int {
-        get { defaults.object(forKey: Key.interval) as? Int ?? 5 }
+        get { max(intervalChoices[0], defaults.object(forKey: Key.interval) as? Int ?? 30) }
         set { defaults.set(newValue, forKey: Key.interval) }
     }
 

@@ -4,10 +4,11 @@ import Foundation
 ///
 /// DDC failures are invisible from the outside — a write is accepted and
 /// quietly ignored, a read returns noise — so the app keeps a plain text
-/// record of what it read and wrote.
+/// record of every transaction and every display event. When the file passes
+/// 1 MB it moves to BrightSync.log.1, so the lines before a hang survive.
 enum Log {
     private static let queue = DispatchQueue(label: "app.brightsync.log")
-    private static let maxBytes = 512 * 1024
+    private static let maxBytes = 1024 * 1024
 
     private static let url: URL = {
         let logs = FileManager.default.homeDirectoryForCurrentUser
@@ -17,6 +18,11 @@ enum Log {
     }()
 
     static var path: String { url.path }
+
+    /// Waits for pending lines to reach the file, for a process about to exit.
+    static func flush() {
+        queue.sync {}
+    }
 
     static func write(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
@@ -28,9 +34,10 @@ enum Log {
                 if (try? handle.seekToEnd()) != nil {
                     try? handle.write(contentsOf: data)
                 }
-                // Keep it small; this is a diary, not an archive.
                 if let size = try? handle.offset(), size > maxBytes {
-                    try? FileHandle(forWritingTo: url).truncate(atOffset: 0)
+                    let previous = url.appendingPathExtension("1")
+                    try? FileManager.default.removeItem(at: previous)
+                    try? FileManager.default.moveItem(at: url, to: previous)
                 }
             } else {
                 try? data.write(to: url)

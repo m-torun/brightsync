@@ -5,6 +5,7 @@ import ServiceManagement
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let engine = SyncEngine()
+    private var events: DisplayEvents!
     private var status = SyncStatus()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -19,19 +20,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         engine.onStatus = { [weak self] status in
             self?.status = status
         }
-        Log.write("launch: BrightSync started")
-        engine.start()
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(displaysChanged),
-            name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
-        )
-    }
-
-    @objc private func displaysChanged() {
-        engine.displaysChanged()
+        Log.write("launch: BrightSync started; waiting \(Int(engine.gate.quietPeriod)) s before talking to displays")
+        events = DisplayEvents(gate: engine.gate) { [weak self] in
+            self?.engine.schedule()
+        }
+        events.start()
+        engine.schedule()
     }
 
     // MARK: - Menu
@@ -40,11 +34,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        switch engine.gate.state {
+        case let .held(reason):
+            menu.addItem(disabledItem("Paused: \(reason)"))
+        case let .settling(remaining):
+            menu.addItem(disabledItem("Waiting for displays to settle (\(Int(remaining.rounded(.up))) s)"))
+        case .open:
+            break
+        }
         if let message = status.message {
             menu.addItem(disabledItem(message))
         }
         for reading in status.readings {
-            var value = reading.percent.map { "\($0)%" } ?? "unreadable"
+            var value = reading.percent.map { "\($0)%" } ?? "not read yet"
             if let preset = reading.colorPreset {
                 value += " · \(ColorPreset.describe(preset))"
             }
@@ -52,7 +54,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                          : "\(reading.name) — \(value)"
             menu.addItem(disabledItem(label))
         }
-        if status.readings.isEmpty, status.message == nil {
+        if status.readings.isEmpty, status.message == nil, engine.gate.isOpen {
             menu.addItem(disabledItem("Looking for displays…"))
         }
 
@@ -112,7 +114,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func intervalItems() -> [NSMenuItem] {
         Preferences.intervalChoices.map { seconds in
-            let item = NSMenuItem(title: "\(seconds) seconds", action: #selector(setInterval(_:)), keyEquivalent: "")
+            let title = seconds < 60 ? "\(seconds) seconds" : seconds == 60 ? "1 minute" : "\(seconds / 60) minutes"
+            let item = NSMenuItem(title: title, action: #selector(setInterval(_:)), keyEquivalent: "")
             item.target = self
             item.tag = seconds
             item.state = Preferences.interval == seconds ? .on : .off
@@ -158,7 +161,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setInterval(_ sender: NSMenuItem) {
         Preferences.interval = sender.tag
-        engine.rescheduleTimer()
+        engine.schedule()
     }
 
     @objc private func syncNow() {

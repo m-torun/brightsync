@@ -8,6 +8,9 @@ light sensor doing its thing, or the keyboard brightness keys only reaching one
 screen — and you want the rest of the desk to match.
 
 - One source display, any number of followers
+- Or follow an ambient light sensor (Philips Hue motion sensors to start with)
+  through a brightness curve you shape from the menu (see
+  [Following an ambient light sensor](#following-an-ambient-light-sensor))
 - Optionally mirrors the color preset (color temperature) as well
 - The source can be any connected display, not just the main one
 - Checks every 10 seconds to 2 minutes (your choice; 30 seconds by default)
@@ -15,7 +18,8 @@ screen — and you want the rest of the desk to match.
   [Staying out of the way](#staying-out-of-the-way))
 - Proportional, not literal: a panel whose range is 0–80 is set to the same
   *percentage*, not the same raw number
-- No Dock icon, no permissions of any kind, one small binary
+- No Dock icon, one small binary, and no permissions unless you pair a Hue
+  bridge, which needs local network access
 
 ## Requirements
 
@@ -50,8 +54,14 @@ allow it once under System Settings → Privacy & Security → **Open Anyway**.
 
 ## Using it
 
-A sun icon appears in the menu bar. Open it to choose the source display, set
-the interval, pause syncing, or enable **Start at login**.
+A sun icon appears in the menu bar. The menu is kept short: what brightness is
+following (with a brightness slider when that is a light sensor), a switch to
+pause syncing, and **Settings…**.
+
+The Settings window holds the rest: what brightness follows, how often a
+source display is checked, which display the color preset is copied from, the
+displays and their current brightness, light sensors and pairing, and
+**Start at login**.
 
 The first line of the menu says when BrightSync is holding off, for example
 `Paused: displays asleep` or `Waiting for displays to settle (42 s)`. It waits
@@ -70,13 +80,70 @@ ACME 27  id=2  brightness=58/100
   key: <EDID UUID>
 ```
 
+`--read` reads any other VCP codes once from each display, for example
+`--read 0x14 0x0C` for the color preset and color temperature.
+
 Displays are remembered by EDID UUID, so your choice of source survives
 reboots and reconnection, where display IDs do not.
 
+## Following an ambient light sensor
+
+Brightness can follow an ambient light sensor instead of a display. That
+helps when a monitor's own sensor will not go as bright or as dim as you want,
+or when no monitor has one. BrightSync ships with support for the light sensor
+in Philips Hue motion sensors.
+
+1. In Settings, under **Light sensors**, click **Pair a Bridge…**, press the
+   round link button on top of the bridge, and click **Pair** within 30 seconds.
+   macOS asks whether BrightSync may find devices on your local network; it
+   needs that to reach the bridge. The key the bridge hands out is kept in your
+   login Keychain.
+2. Choose the sensor under **Brightness → Follow**. Put it where it sees the
+   room's light but not the screens, or it will measure the monitors.
+3. Turn off the monitors' own auto-brightness, or they will fight it.
+
+The bridge pushes a new reading as soon as the light changes (every few seconds
+while it is changing), so nothing is polled. Every display follows the sensor,
+including a single one.
+
+### Shaping the curve
+
+The menu shows a **Brightness** slider with the sensor's current reading
+under it, and Settings shows the whole curve. Out of the box, brightness rises 25 points for every tenfold increase
+in light: 10% at 1 lux, 60% at 100 lux, 100% from about 1800 lux. Moving the
+slider pins the curve to that brightness at the current light, and as the light
+changes the displays follow the curve through your pins. Set it again in other
+light, in the evening or on a bright afternoon, and the curve takes the shape
+you want. A pin that would make the curve dip as the light rises is dropped in
+favour of the newer one. **Reset Curve** in Settings goes back to the default.
+Each sensor keeps its own curve.
+
+### Checking the sensors
+
+```sh
+/Applications/BrightSync.app/Contents/MacOS/BrightSync --sensors 60
+```
+
+lists the light sensors on paired bridges with their readings, then prints each
+new reading for 60 seconds.
+
+### Adding another kind of sensor
+
+A kind of sensor is a class that implements `LightSensorProvider`
+(`Sources/BrightSync/LightSensor.swift`) and is listed in
+`AmbientController.providers`. It reports its sensors with a stable ID, a name
+and the latest reading in lux, calls `onChange` when anything changes, and
+never prompts on its own. The Hue provider (`Sources/BrightSync/Hue/`) is the
+reference: Bonjour discovery, pairing, the key in the Keychain, certificate
+pinning, and an event stream that reconnects with back-off.
+
 ## Color temperature
 
-**Sync color temperature** in the menu is off by default. When on, BrightSync
-also mirrors VCP `0x14` (select color preset) from the source.
+Under **Color preset** in Settings, BrightSync can also copy VCP `0x14`
+(select color preset) from one display to the others. It is off by default.
+The color source is chosen separately from the brightness source, so
+brightness can follow a light sensor while the color preset follows a
+monitor.
 
 This is best-effort by nature, and worth understanding before relying on it:
 
@@ -110,6 +177,11 @@ In a steady state that is one DDC read per round (two with color sync on) and
 no writes. With a single display, or with sync switched off, BrightSync sends
 nothing at all.
 
+When following a light sensor there are no periodic reads at all: each display
+is read once after it settles, then written to only when the target moves by
+more than a point (by any amount when you move the slider). A slider being
+dragged is coalesced into at most one round every tenth of a second.
+
 All DDC traffic runs on a background queue; a single read takes roughly 100 ms.
 
 ## Staying out of the way
@@ -142,15 +214,21 @@ mid-transaction, say), so a transaction already under way can still meet one.
 ## Settings and privacy
 
 Settings are stored in your own `UserDefaults` under
-`app.brightsync.BrightSync` (source display, interval, enabled, deadband,
-color temperature syncing).
-Nothing is written into this repository, and the app makes no network requests.
+`app.brightsync.BrightSync` (source display or sensor, interval, enabled,
+deadband, color temperature syncing, your brightness curves, and the last
+address of each Hue bridge). Hue keys are in your login Keychain under
+"BrightSync Hue".
+Nothing is written into this repository. The app makes no network requests
+unless you pair a Hue bridge, and then only to that bridge on your local
+network, after checking its certificate against Philips' own CA.
 
 ## Notes and limits
 
 - A monitor's own auto-brightness feature keeps adjusting the panel. That is
   fine, and is in fact a nice way to use this: make that monitor the source and
   the others will follow its sensor.
+- When following a light sensor, turn the monitors' own auto-brightness off;
+  otherwise both keep adjusting the same panel.
 - A monitor's auto-brightness switch is usually *not* a DDC feature. On Dell
   UltraSharps, for example, it is controlled over USB HID by Dell Display and
   Peripheral Manager, so BrightSync cannot turn it on or off — use the vendor's
@@ -160,9 +238,10 @@ Nothing is written into this repository, and the app makes no network requests.
 
 ## Log
 
-`~/Library/Logs/BrightSync.log` (**Reveal log in Finder** in the menu) records
+`~/Library/Logs/BrightSync.log` (**Reveal Log in Finder** in Settings) records
 every DDC transaction (display, VCP code, read or write, result and how long
-it took) and every sleep, wake and display change BrightSync saw. That is the
+it took), every sleep, wake and display change BrightSync saw, and every light
+reading with the brightness it asked for. That is the
 only way to tell a quietly ignored DDC write from one that took, and it shows
 what was last sent if a display ever hangs. Past 1 MB the file moves to
 `BrightSync.log.1`.
@@ -173,6 +252,9 @@ what was last sent if a display ever hangs. Past 1 MB the file moves to
 2026-10-21T21:15:03Z  ddc read  STUDIO DISPLAY 0x10 → 61/100 (98 ms)
 2026-10-21T21:15:03Z  ddc read  ACME 27 0x10 → 40/100 (97 ms)
 2026-10-21T21:15:03Z  ddc write ACME 27 0x10 = 61 → sent (23 ms)
+2026-10-21T21:40:12Z  hue: Desk sensor 64 lux
+2026-10-21T21:40:12Z  ambient: 64 lux → 74%
+2026-10-21T21:40:12Z  ddc write ACME 27 0x10 = 74 → sent (24 ms)
 ```
 
 ## Tests
@@ -184,7 +266,9 @@ what was last sent if a display ever hangs. Past 1 MB the file moves to
 The tests drive the sync engine against a fake set of displays and a fake
 clock, and check the exact DDC transactions sent: none before the launch quiet
 period ends, none while displays sleep, one read per round in a steady state,
-backing off after failures, and so on.
+backing off after failures, following a sensor target, and so on. Others
+cover the brightness curve, the event stream parser and parsing the Hue
+bridge's replies.
 
 ## Credits
 

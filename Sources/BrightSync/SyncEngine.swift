@@ -43,21 +43,28 @@ enum ColorPreset {
 struct SyncSettings {
     var isEnabled = true
     var syncColor = false
+    /// The display whose colour preset the others copy; nil for the main display.
+    var colorSourceKey: String?
     var sourceKey: String?
+    /// Follow a light sensor's brightness target instead of a display.
+    var followsSensor = false
     var deadband = 1
     var interval: TimeInterval = 30
 
     static var current: SyncSettings {
         SyncSettings(isEnabled: Preferences.isEnabled,
                      syncColor: Preferences.syncColorTemperature,
+                     colorSourceKey: Preferences.colorSource,
                      sourceKey: Preferences.sourceDisplay,
+                     followsSensor: Preferences.sourceSensor != nil,
                      deadband: Preferences.deadband,
                      interval: TimeInterval(Preferences.interval))
     }
 }
 
 /// Mirrors the source display's brightness, and optionally its colour preset,
-/// onto the other displays, while sending as little over DDC as it can:
+/// onto the other displays, or sets every display to the brightness a light
+/// sensor asks for, while sending as little over DDC as it can:
 ///
 /// - nothing while the gate is closed: during sleep, wake and display
 ///   changes, and for a quiet period after each;
@@ -91,6 +98,10 @@ final class SyncEngine {
     /// another. Those are remembered so they are not rewritten every round.
     private var rejectedPresets: Set<String> = []
     private var backoff: [String: (failures: Int, until: TimeInterval)] = [:]
+    /// The brightness a light sensor asks for, in percent. `exact` when the
+    /// user chose it with the slider, so even a one-point change is written.
+    private var ambient: (percent: Double, exact: Bool)?
+    private var ambientRoundPending = false
 
     /// Called on the main queue after each round.
     var onStatus: ((SyncStatus) -> Void)?
@@ -123,6 +134,27 @@ final class SyncEngine {
             self.backoff = [:]
             self.tick()
         }
+    }
+
+    /// Sets the brightness to follow a light sensor, or nil when there is no
+    /// reading. Rapid changes, such as a slider being dragged, are coalesced
+    /// into one round, and the gate still decides whether it may run.
+    func setAmbientTarget(_ percent: Double?, exact: Bool = false) {
+        queue.async {
+            self.receiveAmbient(percent, exact: exact)
+            guard !self.ambientRoundPending else { return }
+            self.ambientRoundPending = true
+            self.queue.asyncAfter(deadline: .now() + 0.1) {
+                self.ambientRoundPending = false
+                self.tick()
+                self.planNextRound()
+            }
+        }
+    }
+
+    /// Runs on the queue; the tests call it directly.
+    func receiveAmbient(_ percent: Double?, exact: Bool) {
+        ambient = percent.map { ($0, exact) }
     }
 
     /// Seconds until the next round, or nil to wait for the event that ends a hold.
@@ -164,56 +196,87 @@ final class SyncEngine {
             status.readings = displays.map { reading($0, isSource: false) }
             return
         }
-        guard displays.count > 1 else {
-            status.message = displays.isEmpty ? "No DDC-capable displays found" : "Only one display: nothing to sync"
-            status.readings = displays.map { reading($0, isSource: false) }
-            return
+        // Brightness and colour have separate sources: brightness may follow a
+        // light sensor while the colour preset follows a display.
+        let brightnessSource = round.followsSensor ? nil : source(from: displays)
+        let synced = round.followsSensor ? followSensor(&status) : followDisplay(brightnessSource, &status)
+        syncColor()
+
+        status.readings = displays.map { reading($0, isSource: $0.key == brightnessSource?.key) }
+        if synced, !aborted {
+            status.lastSync = Date()
         }
+    }
 
-        let source = self.source(from: displays)
-        let targets = displays.filter { $0.key != source.key }
-        status.readings = displays.map { reading($0, isSource: $0.key == source.key) }
-
+    /// Mirrors the source display's brightness onto the others. Each round
+    /// reads only the source.
+    private func followDisplay(_ source: Display?, _ status: inout SyncStatus) -> Bool {
+        guard let source, displays.count > 1 else {
+            status.message = displays.isEmpty ? "No DDC-capable displays found" : "Only one display: nothing to sync"
+            return false
+        }
         guard let brightness = read(source, DDCKIT_VCP_BRIGHTNESS, fresh: true) else {
             if !aborted {
                 status.message = bus.isAvailable(source) ? "Could not read \(source.name)" : "\(source.name) is asleep or offline"
             }
-            return
+            return false
         }
-        // Only pay for the extra read when colour syncing is on.
-        let sourceColor = round.syncColor ? read(source, DDCKIT_VCP_COLOR_PRESET, fresh: true) : nil
+        for target in displays where target.key != source.key {
+            follow(target, fraction: Double(brightness.current) / Double(brightness.max), deadband: round.deadband)
+        }
+        return true
+    }
 
-        for target in targets {
-            // Brightness is continuous and each panel has its own range, so
-            // mirror the proportion rather than the raw value.
-            if let current = read(target, DDCKIT_VCP_BRIGHTNESS, fresh: false) {
-                let wanted = Int((Double(brightness.current) / Double(brightness.max) * Double(current.max)).rounded())
-                if abs(current.current - wanted) > round.deadband {
-                    write(target, DDCKIT_VCP_BRIGHTNESS, wanted)
+    /// A light sensor sets the target, so every display follows it, a single
+    /// display included, and nothing needs reading but each display's range.
+    private func followSensor(_ status: inout SyncStatus) -> Bool {
+        guard !displays.isEmpty else {
+            status.message = "No DDC-capable displays found"
+            return false
+        }
+        guard let ambient else {
+            status.message = "Waiting for a light reading"
+            return false
+        }
+        for display in displays {
+            follow(display, fraction: ambient.percent / 100, deadband: ambient.exact ? 0 : round.deadband)
+        }
+        return true
+    }
+
+    /// Copies the colour preset from its source display to the others, when
+    /// that is switched on. The preset is enumerated, so it is copied
+    /// verbatim, and only when the target's list goes that far.
+    private func syncColor() {
+        guard round.syncColor, displays.count > 1,
+              let source = displays.first(where: { $0.key == round.colorSourceKey }) ?? mainDisplay(),
+              let sourceColor = read(source, DDCKIT_VCP_COLOR_PRESET, fresh: true) else { return }
+        for target in displays where target.key != source.key {
+            guard let current = read(target, DDCKIT_VCP_COLOR_PRESET, fresh: false) else { continue }
+            let wanted = sourceColor.current
+            let rejected = rejectedPresets.contains(presetKey(target, wanted))
+            if wanted != current.current, wanted <= current.max, !rejected,
+               write(target, DDCKIT_VCP_COLOR_PRESET, wanted) {
+                // On some panels each preset carries its own brightness.
+                known[cacheKey(target, DDCKIT_VCP_BRIGHTNESS)] = nil
+                // Confirm it took: an unsupported preset is silently ignored
+                // or swapped for another.
+                if let after = read(target, DDCKIT_VCP_COLOR_PRESET, fresh: true), after.current != wanted {
+                    rejectedPresets.insert(presetKey(target, wanted))
+                    log("\(target.name) does not take colour preset \(wanted); it shows \(after.current)")
                 }
             }
-            // The colour preset is enumerated, so it is copied verbatim, and
-            // only when this panel's list goes that far.
-            if let sourceColor, let current = read(target, DDCKIT_VCP_COLOR_PRESET, fresh: false) {
-                let wanted = sourceColor.current
-                let rejected = rejectedPresets.contains(presetKey(target, wanted))
-                if wanted != current.current, wanted <= current.max, !rejected,
-                   write(target, DDCKIT_VCP_COLOR_PRESET, wanted) {
-                    // On some panels each preset carries its own brightness.
-                    known[cacheKey(target, DDCKIT_VCP_BRIGHTNESS)] = nil
-                    // Confirm it took: an unsupported preset is silently ignored
-                    // or swapped for another.
-                    if let after = read(target, DDCKIT_VCP_COLOR_PRESET, fresh: true), after.current != wanted {
-                        rejectedPresets.insert(presetKey(target, wanted))
-                        log("\(target.name) does not take colour preset \(wanted); it shows \(after.current)")
-                    }
-                }
-            }
         }
+    }
 
-        status.readings = displays.map { reading($0, isSource: $0.key == source.key) }
-        if !aborted {
-            status.lastSync = Date()
+    /// Brightness is continuous and each panel has its own range, so the
+    /// proportion is what is matched, not the raw value. A display is read
+    /// once after it settles; after that, only written to.
+    private func follow(_ display: Display, fraction: Double, deadband: Int) {
+        guard let current = read(display, DDCKIT_VCP_BRIGHTNESS, fresh: false) else { return }
+        let wanted = Int((fraction * Double(current.max)).rounded())
+        if abs(current.current - wanted) > deadband {
+            write(display, DDCKIT_VCP_BRIGHTNESS, wanted)
         }
     }
 
@@ -229,12 +292,16 @@ final class SyncEngine {
     }
 
     /// Picks the configured source, falling back to the main display.
-    private func source(from displays: [Display]) -> Display {
+    private func source(from displays: [Display]) -> Display? {
         if let key = round.sourceKey, let match = displays.first(where: { $0.key == key }) {
             return match
         }
+        return mainDisplay()
+    }
+
+    private func mainDisplay() -> Display? {
         let main = CGMainDisplayID()
-        return displays.first(where: { $0.id == main }) ?? displays[0]
+        return displays.first(where: { $0.id == main }) ?? displays.first
     }
 
     // MARK: - Guarded transactions

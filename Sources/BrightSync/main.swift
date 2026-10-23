@@ -28,6 +28,115 @@ if CommandLine.arguments.contains("--list") {
     exit(0)
 }
 
+// `--read <code>...` reads the given VCP codes (hex) once from each display,
+// e.g. `--read 0x14 0x0C`, to see what a monitor reports beyond brightness.
+if let flag = CommandLine.arguments.firstIndex(of: "--read") {
+    let codes = CommandLine.arguments.dropFirst(flag + 1).compactMap { Int32($0.replacingOccurrences(of: "0x", with: ""), radix: 16) }
+    let bus = DDCBus()
+    for display in bus.enumerate() where bus.isAvailable(display) {
+        for code in codes {
+            let value: String
+            switch bus.read(display, code) {
+            case let .value(current, max): value = "\(current)/\(max)"
+            case .unsupported: value = "unsupported"
+            case let .failed(reason): value = "unreadable (\(reason))"
+            }
+            print("\(display.name)  \(String(format: "0x%02X", code)) = \(value)")
+        }
+    }
+    Log.flush()
+    exit(0)
+}
+
+// `--sensors [seconds]` lists the light sensors on paired Hue bridges with
+// their current reading, then keeps printing readings as they arrive for that
+// many seconds. The same code path as the app, so it also checks pairing,
+// the Keychain and the bridge's certificate.
+if let flag = CommandLine.arguments.firstIndex(of: "--sensors") {
+    let watch = CommandLine.arguments.dropFirst(flag + 1).first.flatMap(TimeInterval.init) ?? 0
+    let hue = HueProvider()
+    hue.start()
+    guard hue.isPaired else {
+        print("No Hue bridge is paired. Pair one from the menu: Brightness source → Pair Hue Bridge…")
+        exit(1)
+    }
+    var shown: [String: String] = [:]
+    var lastProblem: String?
+    hue.onChange = {
+        let time = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime])
+        for sensor in hue.sensors where shown[sensor.id] != HueBridge.format(sensor.lux) {
+            shown[sensor.id] = HueBridge.format(sensor.lux)
+            print("\(time)  \(sensor.name): \(HueBridge.format(sensor.lux)) lux  [\(sensor.id)]")
+        }
+        if hue.problem != lastProblem, let problem = hue.problem {
+            print("\(time)  \(problem)")
+        }
+        lastProblem = hue.problem
+        if watch == 0, !hue.sensors.isEmpty {
+            Log.flush()
+            exit(0)
+        }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + max(watch, 15)) {
+        Log.flush()
+        exit(hue.sensors.isEmpty ? 1 : 0)
+    }
+    dispatchMain()
+}
+
+// `--snapshot-settings <folder>` draws each Settings tab, filled with made-up
+// displays and a demo sensor, into PNG files. For checking the layout without
+// a screen recording permission. The demo settings live in the arguments
+// domain, which is never saved, so the real preferences are not touched.
+if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
+   let folder = CommandLine.arguments.dropFirst(flag + 1).first {
+    final class DemoSensors: LightSensorProvider {
+        let name = "Philips Hue"
+        let sensors = [LightSensor(id: "demo:desk", name: "Desk sensor", lux: 120, updated: Date())]
+        let problem: String? = nil
+        let activity: String? = nil
+        var onChange: (() -> Void)?
+        func start() {}
+        func refresh() {}
+        func addSensors() {}
+    }
+    var curve = AmbientCurve()
+    curve.set(80, at: 120)
+    curve.set(35, at: 3)
+    // `--display` shows brightness following a display instead of the sensor.
+    let following = CommandLine.arguments.contains("--display")
+    var demo: [String: Any] = [
+        "sourceDisplayKey": "uuid-dell",
+        "colorSourceKey": "uuid-dell",
+        "syncColorTemperature": true,
+        "ambientCurves": try! JSONEncoder().encode(["demo:desk": curve]),
+    ]
+    if !following {
+        demo["sourceSensorID"] = "demo:desk"
+    }
+    UserDefaults.standard.setVolatileDomain(demo, forName: UserDefaults.argumentDomain)
+
+    NSApplication.shared.setActivationPolicy(.prohibited)
+    let model = AppModel(providers: [DemoSensors()])
+    model.show(SyncStatus(readings: [
+        DisplayReading(key: "uuid-dell", name: "DELL U3225QE", percent: 80, colorPreset: 5, isSource: following),
+        DisplayReading(key: "uuid-lenovo", name: "LEN T27p-10", percent: 80, colorPreset: 5, isSource: false),
+    ]))
+    let window = AppController.settingsWindow(for: model)
+    window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+    window.orderFrontRegardless()
+    for tab in SettingsView.Tab.allCases {
+        model.settingsTab = tab
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        guard let view = window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+        view.cacheDisplay(in: view.bounds, to: image)
+        let url = URL(fileURLWithPath: folder).appendingPathComponent("settings-\(tab)\(following ? "-display" : "").png")
+        try? image.representation(using: .png, properties: [:])?.write(to: url)
+        print("\(url.path)  \(Int(view.bounds.width))×\(Int(view.bounds.height))")
+    }
+    exit(0)
+}
+
 let application = NSApplication.shared
 let controller = AppController()
 application.delegate = controller

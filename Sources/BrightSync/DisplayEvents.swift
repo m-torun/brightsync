@@ -5,10 +5,10 @@ import CoreGraphics
 /// that the log shows what the displays went through next to what was sent.
 final class DisplayEvents {
     private let gate: DisplayGate
-    private let onEvent: () -> Void
+    private let onEvent: (DisplayGate.Event) -> Void
     private var observers: [NSObjectProtocol] = []
 
-    init(gate: DisplayGate, onEvent: @escaping () -> Void) {
+    init(gate: DisplayGate, onEvent: @escaping (DisplayGate.Event) -> Void) {
         self.gate = gate
         self.onEvent = onEvent
     }
@@ -50,7 +50,7 @@ final class DisplayEvents {
     fileprivate func handle(_ event: DisplayGate.Event, detail: String?) {
         gate.record(event)
         Log.write("event: \(event.rawValue)\(detail.map { " (\($0))" } ?? "")")
-        onEvent()
+        onEvent(event)
     }
 }
 

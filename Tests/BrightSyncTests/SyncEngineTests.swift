@@ -183,4 +183,89 @@ final class SyncEngineTests {
         settleAndSync()
         #expect(!bus.transactions.contains { $0.contains("\(preset)") })
     }
+
+    // MARK: - Following a light sensor
+
+    @Test func aSensorTargetIsWrittenToEveryDisplayEvenASingleOne() {
+        bus.panels.removeLast()
+        settings.followsSensor = true
+        bus["Dell"].brightness = (20, 100)
+        engine.receiveAmbient(72, exact: false)
+        settleAndSync()
+        #expect(bus.transactions == ["read Dell \(brightness)", "write Dell \(brightness)=72"])
+    }
+
+    @Test func aSteadySensorSendsNothingAfterTheFirstRound() {
+        settings.followsSensor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        for _ in 0..<120 {
+            clock.advance(30)
+            engine.tick()
+        }
+        #expect(bus.transactions.isEmpty)
+    }
+
+    @Test func aNewTargetIsOnlyWrittenNotReadAgain() {
+        settings.followsSensor = true
+        bus["Lenovo"].brightness = (40, 200)
+        engine.receiveAmbient(50, exact: false)
+        settleAndSync()
+        bus.reset()
+        engine.receiveAmbient(80, exact: false)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=80", "write Lenovo \(brightness)=160"])
+    }
+
+    @Test func theSliderIsExactButTheSensorHasADeadband() {
+        settings.followsSensor = true
+        bus["Dell"].brightness = (60, 100)
+        bus["Lenovo"].brightness = (60, 100)
+        engine.receiveAmbient(61, exact: false)
+        settleAndSync()
+        #expect(!bus.transactions.contains { $0.hasPrefix("write") })
+        engine.receiveAmbient(61, exact: true)
+        engine.tick()
+        #expect(bus.transactions.filter { $0.hasPrefix("write") } == ["write Dell \(brightness)=61", "write Lenovo \(brightness)=61"])
+    }
+
+    @Test func withoutAReadingNothingIsSent() {
+        settings.followsSensor = true
+        settleAndSync()
+        #expect(bus.transactions.isEmpty)
+        #expect(engine.lastStatus.message == "Waiting for a light reading")
+    }
+
+    @Test func aSensorTargetWaitsForTheGate() {
+        settings.followsSensor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        gate.record(.screensSlept)
+        engine.receiveAmbient(90, exact: true)
+        engine.tick()
+        #expect(bus.transactions.isEmpty)
+        gate.record(.screensWoke)
+        clock.advance(60)
+        engine.tick()
+        #expect(bus.transactions.filter { $0.hasPrefix("write") } == ["write Dell \(brightness)=90", "write Lenovo \(brightness)=90"])
+    }
+
+    @Test func colourCanFollowADisplayWhileBrightnessFollowsASensor() {
+        settings.followsSensor = true
+        settings.syncColor = true
+        settings.colorSourceKey = "uuid-Dell"
+        bus["Dell"].preset = (8, 12)
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        #expect(bus.transactions.filter { $0.hasPrefix("write") } ==
+                ["write Dell \(brightness)=60", "write Lenovo \(brightness)=60", "write Lenovo \(preset)=8"])
+        clock.advance(30)
+        engine.tick() // re-reads the Lenovo's brightness once, since a preset can carry its own
+        bus.reset()
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions == ["read Dell \(preset)"], "steady state: only the colour source is read")
+    }
 }

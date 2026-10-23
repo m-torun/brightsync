@@ -1,12 +1,18 @@
 import AppKit
-import ServiceManagement
+import Combine
+import SwiftUI
 
-/// Menu bar presence and the small settings menu.
+/// The menu bar item: a short menu for the everyday controls, and the
+/// Settings window for everything else.
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private let model = AppModel()
     private var statusItem: NSStatusItem!
-    private let engine = SyncEngine()
-    private var events: DisplayEvents!
-    private var status = SyncStatus()
+    private var settingsWindow: NSWindow?
+    private var changes: AnyCancellable?
+    /// Kept while the menu is open, so readings can update in place.
+    private var menuIsOpen = false
+    private var sliderView: SliderMenuView?
+    private var followingItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -17,15 +23,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
 
-        engine.onStatus = { [weak self] status in
-            self?.status = status
+        model.start()
+        changes = model.objectWillChange.sink { [weak self] _ in
+            // Sent before the change lands, so look once it has.
+            DispatchQueue.main.async { self?.refreshOpenMenu() }
         }
-        Log.write("launch: BrightSync started; waiting \(Int(engine.gate.quietPeriod)) s before talking to displays")
-        events = DisplayEvents(gate: engine.gate) { [weak self] in
-            self?.engine.schedule()
-        }
-        events.start()
-        engine.schedule()
     }
 
     // MARK: - Menu
@@ -33,102 +35,80 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Rebuilt each time it opens so the readings are current.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-
-        switch engine.gate.state {
-        case let .held(reason):
-            menu.addItem(disabledItem("Paused: \(reason)"))
-        case let .settling(remaining):
-            menu.addItem(disabledItem("Waiting for displays to settle (\(Int(remaining.rounded(.up))) s)"))
-        case .open:
-            break
+        sliderView = nil
+        followingItem = nil
+        // Whatever was wrong may just have been fixed (a permission granted,
+        // the bridge plugged back in), so try now rather than after the back-off.
+        if model.ambient.problem != nil {
+            model.ambient.refresh()
         }
-        if let message = status.message {
+
+        if let paused = model.pausedReason {
+            menu.addItem(disabledItem(paused))
+        }
+        if model.followsSensor {
+            let view = SliderMenuView(title: "Brightness")
+            view.onChange = { [weak self] percent, finished in
+                self?.model.setBrightness(percent, finished: finished)
+            }
+            sliderView = view
+            let item = NSMenuItem()
+            item.view = view
+            menu.addItem(item)
+            // A problem while there is still a reading would not fit the caption.
+            if let problem = model.ambient.problem, model.ambient.selected?.lux != nil {
+                menu.addItem(disabledItem(problem))
+            }
+        } else if let line = model.followingLine {
+            followingItem = disabledItem(line)
+            menu.addItem(followingItem!)
+        }
+        if let message = model.status.message, !model.followsSensor {
             menu.addItem(disabledItem(message))
         }
-        for reading in status.readings {
-            var value = reading.percent.map { "\($0)%" } ?? "not read yet"
-            if let preset = reading.colorPreset {
-                value += " · \(ColorPreset.describe(preset))"
-            }
-            let label = reading.isSource ? "\(reading.name) — \(value)  (source)"
-                                         : "\(reading.name) — \(value)"
-            menu.addItem(disabledItem(label))
-        }
-        if status.readings.isEmpty, status.message == nil, engine.gate.isOpen {
-            menu.addItem(disabledItem("Looking for displays…"))
-        }
+        refreshOpenMenu()
 
         menu.addItem(.separator())
 
         let toggle = NSMenuItem(title: "Sync brightness", action: #selector(toggleEnabled), keyEquivalent: "")
         toggle.target = self
-        toggle.state = Preferences.isEnabled ? .on : .off
+        toggle.state = model.isEnabled ? .on : .off
         menu.addItem(toggle)
 
-        let colorToggle = NSMenuItem(title: "Sync color temperature", action: #selector(toggleColor), keyEquivalent: "")
-        colorToggle.target = self
-        colorToggle.state = Preferences.syncColorTemperature ? .on : .off
-        colorToggle.toolTip = "Mirrors the color preset (VCP 0x14). Preset numbering is only nominally standard, so two vendors may disagree about what a preset means."
-        menu.addItem(colorToggle)
+        let color = NSMenuItem(title: "Sync color", action: #selector(toggleColor), keyEquivalent: "")
+        color.target = self
+        color.state = model.syncColor ? .on : .off
+        color.toolTip = "Copies the color preset from the display chosen in Settings → Color to the others."
+        menu.addItem(color)
 
-        menu.addItem(submenu(title: "Source display", items: sourceItems()))
-        menu.addItem(submenu(title: "Check every", items: intervalItems()))
-
-        let syncNow = NSMenuItem(title: "Sync now", action: #selector(syncNow), keyEquivalent: "")
-        syncNow.target = self
-        menu.addItem(syncNow)
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
 
         menu.addItem(.separator())
-
-        let login = NSMenuItem(title: "Start at login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        login.target = self
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(login)
-
-        let showLog = NSMenuItem(title: "Reveal log in Finder", action: #selector(revealLog), keyEquivalent: "")
-        showLog.target = self
-        menu.addItem(showLog)
 
         let quit = NSMenuItem(title: "Quit BrightSync", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
 
-    private func sourceItems() -> [NSMenuItem] {
-        var items: [NSMenuItem] = []
-        let automatic = NSMenuItem(title: "Main display (automatic)", action: #selector(setAutomaticSource), keyEquivalent: "")
-        automatic.target = self
-        automatic.state = Preferences.sourceDisplay == nil ? .on : .off
-        items.append(automatic)
-        items.append(.separator())
-
-        for reading in status.readings {
-            let item = NSMenuItem(title: reading.name, action: #selector(setSource(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = reading.key
-            item.state = Preferences.sourceDisplay == reading.key ? .on : .off
-            items.append(item)
-        }
-        return items
+    func menuWillOpen(_ menu: NSMenu) {
+        menuIsOpen = true
     }
 
-    private func intervalItems() -> [NSMenuItem] {
-        Preferences.intervalChoices.map { seconds in
-            let title = seconds < 60 ? "\(seconds) seconds" : seconds == 60 ? "1 minute" : "\(seconds / 60) minutes"
-            let item = NSMenuItem(title: title, action: #selector(setInterval(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = seconds
-            item.state = Preferences.interval == seconds ? .on : .off
-            return item
-        }
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsOpen = false
+        sliderView = nil
+        followingItem = nil
     }
 
-    private func submenu(title: String, items: [NSMenuItem]) -> NSMenuItem {
-        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        let child = NSMenu()
-        items.forEach { child.addItem($0) }
-        parent.submenu = child
-        return parent
+    /// Updates readings in place while the menu is open, instead of leaving
+    /// what was true when it opened.
+    private func refreshOpenMenu() {
+        sliderView?.show(percent: model.brightness, caption: model.sensorCaption)
+        if let line = model.followingLine {
+            followingItem?.title = line
+        }
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {
@@ -140,51 +120,37 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func toggleEnabled() {
-        Preferences.isEnabled.toggle()
-        engine.syncNow()
+        model.isEnabled.toggle()
     }
 
     @objc private func toggleColor() {
-        Preferences.syncColorTemperature.toggle()
-        engine.syncNow()
+        model.syncColor.toggle()
     }
 
-    @objc private func setAutomaticSource() {
-        Preferences.sourceDisplay = nil
-        engine.syncNow()
+    /// Opening the app again while it runs (from Finder or Spotlight) shows Settings.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openSettings()
+        return false
     }
 
-    @objc private func setSource(_ sender: NSMenuItem) {
-        Preferences.sourceDisplay = sender.representedObject as? String
-        engine.syncNow()
-    }
-
-    @objc private func setInterval(_ sender: NSMenuItem) {
-        Preferences.interval = sender.tag
-        engine.schedule()
-    }
-
-    @objc private func syncNow() {
-        engine.syncNow()
-    }
-
-    @objc private func toggleLaunchAtLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Could not change the login item"
-            alert.informativeText = "\(error.localizedDescription)\n\nYou can also set this in System Settings → General → Login Items."
-            alert.runModal()
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = Self.settingsWindow(for: model)
+            settingsWindow?.center()
         }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func revealLog() {
-        NSWorkspace.shared.selectFile(Log.path, inFileViewerRootedAtPath: "")
+    /// Sized by its content, one tab at a time, and not resizable.
+    static func settingsWindow(for model: AppModel) -> NSWindow {
+        let hosting = NSHostingController(rootView: SettingsView(model: model))
+        hosting.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "BrightSync Settings"
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isReleasedWhenClosed = false
+        return window
     }
 
     @objc private func quit() {

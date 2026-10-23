@@ -93,4 +93,49 @@ struct DisplayGateTests {
         gate.record(.reconfigured)
         #expect(gate.generation == first + 1)
     }
+
+    // MARK: - Conditions
+
+    @Test func aConditionPausesWithoutCountingAsADisplayChange() {
+        var inCall = false
+        let gate = DisplayGate(quietPeriod: 60, now: { [clock] in clock.time },
+                               conditions: [{ inCall ? "camera or microphone in use" : nil }])
+        clock.advance(60)
+        let generation = gate.generation
+        inCall = true
+        #expect(gate.state == .paused("camera or microphone in use"))
+        inCall = false
+        #expect(gate.isOpen, "no quiet period after a call: the displays did not change")
+        #expect(gate.generation == generation)
+    }
+
+    @Test func sleepOutranksAPause() {
+        let gate = DisplayGate(quietPeriod: 60, now: { [clock] in clock.time }, conditions: [{ "displays about to sleep" }])
+        gate.record(.screensSlept)
+        #expect(gate.state == .held("displays asleep"))
+    }
+
+    @Test func aLockedScreenHoldsUntilUnlocked() {
+        let gate = self.gate
+        clock.advance(60)
+        gate.record(.screenLocked)
+        clock.advance(3_600)
+        #expect(gate.state == .held("screen locked"))
+        gate.record(.screenUnlocked)
+        clock.advance(60)
+        #expect(gate.isOpen)
+    }
+
+    @Test func theDisplaySleepTimerIsReadFromPmset() {
+        let output = """
+        System-wide power settings:
+        Currently in use:
+         standby              0
+         displaysleep         10 (display sleep prevented by Teams)
+         sleep                1
+        """
+        #expect(IdleDisplaySleep.parseTimeout(output) == 600)
+        #expect(IdleDisplaySleep.parseTimeout(" displaysleep         0") == nil, "0 means never")
+        #expect(IdleDisplaySleep.parseTimeout("") == nil)
+    }
 }

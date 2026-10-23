@@ -14,6 +14,7 @@ enum Preferences {
         static let sourceSensor = "sourceSensorID"
         static let curves = "ambientCurves"
         static let hueHosts = "hueBridgeHosts"
+        static let pauseDuringCalls = "pauseDuringCalls"
     }
 
     /// How often the source display is read. Every read goes through the
@@ -80,6 +81,12 @@ enum Preferences {
     static var colorSource: String? {
         get { defaults.string(forKey: Key.colorSource) ?? sourceDisplay }
         set { defaults.set(newValue, forKey: Key.colorSource) }
+    }
+
+    /// Send nothing while any app uses the camera or microphone. On by default.
+    static var pauseDuringCalls: Bool {
+        get { defaults.object(forKey: Key.pauseDuringCalls) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.pauseDuringCalls) }
     }
 
     /// Ignore differences at or below this many points, so that rounding

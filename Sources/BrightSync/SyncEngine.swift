@@ -77,6 +77,8 @@ struct SyncSettings {
 /// All DDC traffic happens on one serial queue, since a read takes about 100 ms.
 final class SyncEngine {
     static let maxBackoff: TimeInterval = 30 * 60
+    /// How often a pause (a call, the idle timer running out) is checked again.
+    static let pauseRecheck: TimeInterval = 15
 
     let gate: DisplayGate
     private let bus: DisplayBus
@@ -98,10 +100,15 @@ final class SyncEngine {
     /// another. Those are remembered so they are not rewritten every round.
     private var rejectedPresets: Set<String> = []
     private var backoff: [String: (failures: Int, until: TimeInterval)] = [:]
+    /// Readings that came back unusable, per display and VCP code. Only that
+    /// reading waits; writes to the display carry on.
+    private var readBackoff: [String: (failures: Int, until: TimeInterval)] = [:]
     /// The brightness a light sensor asks for, in percent. `exact` when the
     /// user chose it with the slider, so even a one-point change is written.
     private var ambient: (percent: Double, exact: Bool)?
     private var ambientRoundPending = false
+    /// The pause last logged, so each one is logged once.
+    private var pausedFor: String?
 
     /// Called on the main queue after each round.
     var onStatus: ((SyncStatus) -> Void)?
@@ -161,6 +168,7 @@ final class SyncEngine {
     func nextDelay() -> TimeInterval? {
         switch gate.state {
         case .held: return nil
+        case .paused: return Self.pauseRecheck
         case let .settling(remaining): return remaining + 0.1
         case .open: return settledGeneration == gate.generation ? settings().interval : 0
         }
@@ -180,9 +188,25 @@ final class SyncEngine {
         self.timer = timer
     }
 
+    /// Waits, up to `timeout`, for a transaction already under way. For the
+    /// sleep hook, after the gate has closed, so nothing new starts.
+    func finishTransactions(timeout: TimeInterval = 2) {
+        let done = DispatchSemaphore(value: 0)
+        queue.async { done.signal() }
+        _ = done.wait(timeout: .now() + timeout)
+    }
+
     /// One round. Runs on the queue; the tests call it directly.
     func tick() {
-        guard gate.isOpen else { return }
+        let state = gate.state
+        if case let .paused(reason) = state, reason != pausedFor {
+            log("holding off: \(reason)")
+            pausedFor = reason
+        } else if state == .open, let reason = pausedFor {
+            log("resuming: no longer \(reason)")
+            pausedFor = nil
+        }
+        guard state == .open else { return }
         round = settings()
         aborted = false
         if settledGeneration != gate.generation {
@@ -312,14 +336,21 @@ final class SyncEngine {
         if !fresh, let value = known[key] {
             return value
         }
+        if let wait = readBackoff[key], now() < wait.until {
+            return nil
+        }
         guard !unsupported.contains(key), mayTalk(to: display) else { return nil }
         switch bus.read(display, vcp) {
         case let .value(current, max):
             backoff[display.key] = nil
+            readBackoff[key] = nil
             known[key] = (current, max)
             return (current, max)
         case .unsupported:
             unsupported.insert(key)
+            return nil
+        case .garbled:
+            garbled(display, vcp)
             return nil
         case .failed:
             failed(display)
@@ -356,6 +387,18 @@ final class SyncEngine {
             return false
         }
         return bus.isAvailable(display)
+    }
+
+    /// An unusable reply is read again next round, then less and less often
+    /// while it keeps happening.
+    private func garbled(_ display: Display, _ vcp: Int32) {
+        let key = cacheKey(display, vcp)
+        let failures = (readBackoff[key]?.failures ?? 0) + 1
+        let delay = min(round.interval * pow(2, Double(failures - 1)), Self.maxBackoff)
+        readBackoff[key] = (failures, now() + delay)
+        if failures > 1 {
+            log("reading \(display.name) \(String(format: "0x%02X", vcp)) again in \(Int(delay)) s after \(failures) unusable replies")
+        }
     }
 
     private func failed(_ display: Display) {

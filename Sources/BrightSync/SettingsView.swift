@@ -198,6 +198,11 @@ private struct GeneralPane: View {
     var body: some View {
         Form {
             Toggle("Start at login", isOn: $model.launchAtLogin)
+            Toggle("Pause during calls", isOn: $model.pauseDuringCalls)
+            LabeledContent("") {
+                Note("Sends nothing to the monitors while any app uses the camera or microphone. A video call keeps the display hardware that also carries these commands at its busiest. Brightness catches up when the call ends.")
+                    .padding(.bottom, 8)
+            }
             LabeledContent("Displays:") {
                 VStack(alignment: .leading, spacing: 4) {
                     if model.displays.isEmpty {

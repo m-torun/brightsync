@@ -19,6 +19,8 @@ final class DisplayGate {
         case systemDidWake = "Mac woke"
         case sessionResigned = "switched to another user"
         case sessionActivated = "switched back to this user"
+        case screenLocked = "screen locked"
+        case screenUnlocked = "screen unlocked"
         case poweringOff = "Mac shutting down"
     }
 
@@ -26,6 +28,9 @@ final class DisplayGate {
         case open
         /// Closed until something wakes up; the quiet period starts after that.
         case held(String)
+        /// Closed while a condition lasts, such as a call. Conditions end
+        /// without an event, so whoever waits checks again now and then.
+        case paused(String)
         case settling(remaining: TimeInterval)
     }
 
@@ -33,6 +38,7 @@ final class DisplayGate {
         var screensAsleep = false
         var systemAsleep = false
         var sessionInactive = false
+        var screenLocked = false
         var poweringOff = false
         var lastEvent: TimeInterval
         var generation = 0
@@ -41,6 +47,9 @@ final class DisplayGate {
     let quietPeriod: TimeInterval
     private let now: () -> TimeInterval
     private let inner: OSAllocatedUnfairLock<Inner>
+    /// Checked every time the state is asked for. Each returns why the gate
+    /// should stay closed, or nil.
+    private let conditions: [() -> String?]
 
     /// Seconds since boot. It stops while the Mac sleeps, which is fine: the
     /// gate is closed then, and the quiet period starts at wake.
@@ -48,9 +57,11 @@ final class DisplayGate {
         TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
     }
 
-    init(quietPeriod: TimeInterval = 60, now: @escaping () -> TimeInterval = DisplayGate.uptime) {
+    init(quietPeriod: TimeInterval = 60, now: @escaping () -> TimeInterval = DisplayGate.uptime,
+         conditions: [() -> String?] = []) {
         self.quietPeriod = quietPeriod
         self.now = now
+        self.conditions = conditions
         inner = OSAllocatedUnfairLock(initialState: Inner(lastEvent: now()))
     }
 
@@ -69,6 +80,8 @@ final class DisplayGate {
             case .systemDidWake: state.systemAsleep = false
             case .sessionResigned: state.sessionInactive = true
             case .sessionActivated: state.sessionInactive = false
+            case .screenLocked: state.screenLocked = true
+            case .screenUnlocked: state.screenLocked = false
             case .poweringOff: state.poweringOff = true
             case .reconfigurationBegan, .reconfigured: break
             }
@@ -79,14 +92,23 @@ final class DisplayGate {
 
     var state: State {
         let time = now()
-        return inner.withLock { state in
+        let fromEvents: State = inner.withLock { state in
             if state.poweringOff { return .held(Event.poweringOff.rawValue) }
             if state.systemAsleep { return .held("Mac asleep") }
             if state.screensAsleep { return .held("displays asleep") }
             if state.sessionInactive { return .held("another user is active") }
+            if state.screenLocked { return .held("screen locked") }
             let remaining = state.lastEvent + quietPeriod - time
             return remaining > 0 ? .settling(remaining: remaining) : .open
         }
+        if case .held = fromEvents {
+            return fromEvents
+        }
+        // Outside the lock: a condition may ask Core Audio or the system.
+        if let reason = conditions.lazy.compactMap({ $0() }).first {
+            return .paused(reason)
+        }
+        return fromEvents
     }
 
     var isOpen: Bool { state == .open }

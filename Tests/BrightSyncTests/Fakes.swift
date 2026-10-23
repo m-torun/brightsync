@@ -3,6 +3,11 @@ import CoreGraphics
 import DDCKit
 @testable import BrightSync
 
+/// A switch a test flips, read by a closure the gate holds.
+final class Flag {
+    var isOn = false
+}
+
 final class FakeClock {
     var time: TimeInterval = 1_000
 
@@ -20,7 +25,10 @@ final class FakeBus: DisplayBus {
         /// Presets the panel silently ignores when written.
         var ignoredPresets: Set<Int> = []
         var asleep = false
+        /// Nothing gets through: the request cannot be sent.
         var failing = false
+        /// The display answers these codes with an unusable reply.
+        var garbled: Set<Int32> = []
     }
 
     var panels: [Panel]
@@ -51,7 +59,10 @@ final class FakeBus: DisplayBus {
         defer { record("read \(display.name) \(vcp)") }
         let panel = self[display.name]
         if panel.failing {
-            return .failed("invalid reply")
+            return .failed("request not sent")
+        }
+        if panel.garbled.contains(vcp) {
+            return .garbled("invalid reply")
         }
         switch vcp {
         case DDCKIT_VCP_BRIGHTNESS:

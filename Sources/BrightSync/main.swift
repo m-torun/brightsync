@@ -18,7 +18,7 @@ if CommandLine.arguments.contains("--list") {
             switch bus.read(display, DDCKIT_VCP_BRIGHTNESS) {
             case let .value(current, max): brightness = "\(current)/\(max)"
             case .unsupported: brightness = "unsupported"
-            case let .failed(reason): brightness = "unreadable (\(reason))"
+            case let .garbled(reason), let .failed(reason): brightness = "unreadable (\(reason))"
             }
         }
         print("\(display.name)  id=\(display.id)  brightness=\(brightness)")
@@ -39,7 +39,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--read") {
             switch bus.read(display, code) {
             case let .value(current, max): value = "\(current)/\(max)"
             case .unsupported: value = "unsupported"
-            case let .failed(reason): value = "unreadable (\(reason))"
+            case let .garbled(reason), let .failed(reason): value = "unreadable (\(reason))"
             }
             print("\(display.name)  \(String(format: "0x%02X", code)) = \(value)")
         }

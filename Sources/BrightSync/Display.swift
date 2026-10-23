@@ -19,6 +19,11 @@ enum ReadResult: Equatable {
     case value(current: Int, max: Int)
     /// The display answered that it has no such feature. Asking again is pointless.
     case unsupported
+    /// The display answered, but the reply was unusable (a bad header or
+    /// checksum). The link works; only this reading is lost.
+    case garbled(String)
+    /// Nothing usable came back: the request could not be sent, or there was
+    /// no reply. The display may be in trouble, so it is left alone for a while.
     case failed(String)
 }
 
@@ -78,14 +83,16 @@ final class DDCBus: DisplayBus {
         let result: ReadResult
         switch code {
         case DDCKIT_OK where maximum > 0: result = .value(current: Int(current), max: Int(maximum))
-        case DDCKIT_OK: result = .failed("reported a maximum of 0")
+        case DDCKIT_OK: result = .garbled("reported a maximum of 0")
         case DDCKIT_UNSUPPORTED: result = .unsupported
+        case DDCKIT_BAD_REPLY: result = .garbled(Self.describe(code))
         default: result = .failed(Self.describe(code))
         }
         let outcome: String
         switch result {
         case let .value(current, max): outcome = "\(current)/\(max)"
         case .unsupported: outcome = "unsupported"
+        case let .garbled(reason): outcome = "unusable: \(reason)"
         case let .failed(reason): outcome = "failed: \(reason)"
         }
         log("ddc read  \(display.name) \(hex(vcp)) → \(outcome) (\(milliseconds(since: started)) ms)")

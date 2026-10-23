@@ -18,7 +18,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var status = SyncStatus()
     @Published var settingsTab = SettingsView.Tab.brightness
 
-    init(engine: SyncEngine = SyncEngine(), providers: [LightSensorProvider] = AmbientController.defaultProviders()) {
+    init(engine: SyncEngine = SyncEngine(gate: DisplayGate(conditions: HoldConditions.all())),
+         providers: [LightSensorProvider] = AmbientController.defaultProviders()) {
         self.engine = engine
         ambient = AmbientController(engine: engine, providers: providers)
     }
@@ -31,7 +32,9 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }
         Log.write("launch: BrightSync started; waiting \(Int(engine.gate.quietPeriod)) s before talking to displays")
-        let events = DisplayEvents(gate: engine.gate) { [weak self] event in
+        let events = DisplayEvents(gate: engine.gate, finishTransactions: { [engine] in
+            engine.finishTransactions()
+        }) { [weak self] event in
             self?.engine.schedule()
             if event == .systemDidWake {
                 self?.ambient.refresh()
@@ -97,6 +100,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var pauseDuringCalls: Bool {
+        get { Preferences.pauseDuringCalls }
+        set {
+            objectWillChange.send()
+            Preferences.pauseDuringCalls = newValue
+            engine.schedule()
+        }
+    }
+
     var interval: Int {
         get { Preferences.interval }
         set {
@@ -139,7 +151,7 @@ final class AppModel: ObservableObject {
     /// Why nothing is being sent right now, if that is the case.
     var pausedReason: String? {
         switch engine.gate.state {
-        case let .held(reason): return "Paused: \(reason)"
+        case let .held(reason), let .paused(reason): return "Paused: \(reason)"
         case let .settling(remaining): return "Waiting for displays to settle (\(Int(remaining.rounded(.up))) s)"
         case .open: return nil
         }

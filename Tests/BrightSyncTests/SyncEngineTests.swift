@@ -14,8 +14,12 @@ final class SyncEngineTests {
     var engine: SyncEngine!
 
     /// Each test gets a fresh instance; the app counts as launched here.
+    /// A condition the tests can switch, standing in for a call.
+    let call = Flag()
+
     init() {
-        gate = DisplayGate(quietPeriod: 60, now: { [clock] in clock.time })
+        gate = DisplayGate(quietPeriod: 60, now: { [clock] in clock.time },
+                           conditions: [{ [call] in call.isOn ? "camera or microphone in use" : nil }])
         engine = SyncEngine(bus: bus, gate: gate,
                             now: { [clock] in clock.time },
                             settings: { [unowned self] in self.settings },
@@ -340,6 +344,74 @@ final class SyncEngineTests {
         settleAndSync()
         bus.reset()
         bus.afterTransaction = { [unowned self] in gate.record(.screensSlept) }
+        engine.receiveAmbient(90, exact: true)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=90"])
+    }
+
+    // MARK: - Unusable replies
+
+    @Test func anUnusableColourReplyDoesNotHoldUpBrightness() {
+        settings.followsSensor = true
+        settings.syncColor = true
+        settings.colorSourceKey = "uuid-Dell"
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus["Dell"].garbled = [preset]
+        clock.advance(30)
+        engine.tick()
+        bus.reset()
+        engine.receiveAmbient(12, exact: false)
+        engine.tick()
+        #expect(bus.transactions.filter { $0.hasPrefix("write") } == ["write Dell \(brightness)=12", "write Lenovo \(brightness)=12"])
+    }
+
+    @Test func anUnusableReplyIsReadAgainNextRoundThenLessOften() {
+        settleAndSync()
+        bus["Dell"].garbled = [brightness]
+        bus.reset()
+        var readsAt: [Int] = []
+        for second in stride(from: 30, through: 600, by: 30) {
+            clock.advance(30)
+            let before = bus.transactions.count
+            engine.tick()
+            if bus.transactions.count > before {
+                readsAt.append(second)
+            }
+        }
+        // 30 s interval: again after 30, then 60, 120 and 240 s.
+        #expect(readsAt == [30, 60, 120, 240, 480])
+    }
+
+    // MARK: - Pauses
+
+    @Test func aCallPausesEverythingAndBrightnessCatchesUpAfter() {
+        settings.followsSensor = true
+        settings.syncColor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        call.isOn = true
+        engine.receiveAmbient(30, exact: true)
+        for _ in 0..<20 {
+            clock.advance(15)
+            engine.tick()
+        }
+        #expect(bus.transactions.isEmpty)
+        #expect(engine.nextDelay() == SyncEngine.pauseRecheck, "checked again every 15 s, with no DDC")
+        call.isOn = false
+        engine.tick()
+        #expect(bus.transactions.contains("write Dell \(brightness)=30"))
+        #expect(logged.contains("holding off: camera or microphone in use"))
+        #expect(logged.contains("resuming: no longer camera or microphone in use"))
+    }
+
+    @Test func aCallStartingMidRoundStopsTheRest() {
+        settings.followsSensor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        bus.afterTransaction = { [unowned self] in call.isOn = true }
         engine.receiveAmbient(90, exact: true)
         engine.tick()
         #expect(bus.transactions == ["write Dell \(brightness)=90"])

@@ -193,8 +193,20 @@ freezes ([Lunar FAQ](https://lunar.fyi/faq#apply-wake),
 [BetterDisplay discussion](https://github.com/waydabber/BetterDisplay/discussions/2622)).
 So BrightSync holds off:
 
-- **While the displays or the Mac sleep**, or another user's session is
-  active. No timer runs at all while held.
+- **While the displays or the Mac sleep**, the screen is locked, or another
+  user's session is active. No timer runs at all while held.
+- **Before the Mac sleeps.** macOS waits for BrightSync's answer before going
+  to sleep, so the gate closes and any transaction already on the wire
+  finishes first (a few hundred milliseconds at most).
+- **Before the displays sleep for inactivity.** macOS only announces display
+  sleep once it has happened, so BrightSync stops sending 15 seconds before
+  the display sleep timer runs out, unless something such as a video is
+  keeping the screen awake.
+- **During calls.** While any app uses the camera or microphone, nothing is
+  sent; brightness catches up when the call ends. A video call with many
+  tiles keeps the display coprocessor at its busiest. This is on by default
+  (**Pause during calls** in Settings → General); reading whether the devices
+  are in use needs no permission and does not open them.
 - **Around any display change.** macOS calls BrightSync before and after every
   reconfiguration (plugging, unplugging, mode changes, the reconnects some
   monitors go through on wake). Each one restarts a 60-second quiet period,
@@ -204,12 +216,17 @@ So BrightSync holds off:
   that arrives during a round stops the rest of it.
 - **For a display macOS reports as asleep or offline**, even when the others
   are awake.
-- **After a failure.** Nothing is retried on the spot. That display is left
-  alone for twice the interval, then four times, up to half an hour; a
-  successful transaction or **Sync now** resets it.
+- **After a failure.** Nothing is retried on the spot. When a request cannot
+  be sent or gets no reply, that display is left alone for twice the
+  interval, then four times, up to half an hour; a successful transaction or
+  **Sync Now** resets it. When the display answers with an unusable reply,
+  the link works and only that reading is lost: it is read again next round,
+  then less and less often, while writes to that display carry on.
 
-macOS cannot announce a monitor that drops off by itself (a cable pulled
-mid-transaction, say), so a transaction already under way can still meet one.
+What is left: macOS cannot announce a monitor that drops off by itself (a
+cable pulled mid-transaction, say), or display sleep you trigger yourself (a
+hot corner, a keyboard shortcut), so a transaction already under way, about
+100 to 200 ms, can still meet one.
 
 ## Settings and privacy
 

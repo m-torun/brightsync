@@ -268,4 +268,80 @@ final class SyncEngineTests {
         engine.tick()
         #expect(bus.transactions == ["read Dell \(preset)"], "steady state: only the colour source is read")
     }
+
+    // MARK: - The gate covers colour and the sensor too
+
+    @Test func colourIsNotSentWhileDisplaysSleep() {
+        settings.syncColor = true
+        settleAndSync()
+        bus.reset()
+        gate.record(.screensSlept)
+        bus["Dell"].preset = (8, 12)
+        for _ in 0..<10 {
+            clock.advance(30)
+            engine.tick()
+        }
+        #expect(bus.transactions.isEmpty)
+        gate.record(.screensWoke)
+        clock.advance(59)
+        engine.tick()
+        #expect(bus.transactions.isEmpty, "not before the quiet period ends")
+    }
+
+    @Test func anEventDuringTheColourPassStopsIt() {
+        settings.syncColor = true
+        bus["Dell"].preset = (8, 12)
+        bus.afterTransaction = { [unowned self] in
+            if bus.transactions.last == "read Dell \(preset)" {
+                gate.record(.reconfigurationBegan)
+            }
+        }
+        settleAndSync()
+        #expect(bus.transactions.last == "read Dell \(preset)", "nothing after the event")
+        #expect(!bus.transactions.contains { $0.hasPrefix("write Lenovo \(preset)") })
+    }
+
+    @Test func aFailedColourReadBacksOffThatDisplay() {
+        settings.syncColor = true
+        settleAndSync()
+        bus.reset()
+        bus["Dell"].failing = true
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions == ["read Dell \(brightness)"], "the first failure ends that display's round")
+        bus.reset()
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions.isEmpty, "brightness and colour wait out the back-off together")
+    }
+
+    @Test func aSensorChangeWhileAsleepIsWrittenOnlyAfterTheQuietPeriod() {
+        settings.followsSensor = true
+        settings.syncColor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        gate.record(.systemWillSleep)
+        engine.receiveAmbient(20, exact: false)
+        engine.tick()
+        gate.record(.systemDidWake)
+        engine.tick()
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions.isEmpty)
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions.contains("write Dell \(brightness)=20"))
+    }
+
+    @Test func anEventMidwayThroughSensorWritesStopsTheRest() {
+        settings.followsSensor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        bus.afterTransaction = { [unowned self] in gate.record(.screensSlept) }
+        engine.receiveAmbient(90, exact: true)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=90"])
+    }
 }

@@ -15,6 +15,7 @@ enum Preferences {
         static let curves = "ambientCurves"
         static let hueHosts = "hueBridgeHosts"
         static let pauseDuringCalls = "pauseDuringCalls"
+        static let displayRanges = "displayBrightnessRanges"
     }
 
     /// How often the source display is read. Every read goes through the
@@ -81,6 +82,12 @@ enum Preferences {
     static var colorSource: String? {
         get { defaults.string(forKey: Key.colorSource) ?? sourceDisplay }
         set { defaults.set(newValue, forKey: Key.colorSource) }
+    }
+
+    /// Each display's brightness maximum, learned from its first good read.
+    static var displayRanges: [String: Int] {
+        get { defaults.dictionary(forKey: Key.displayRanges) as? [String: Int] ?? [:] }
+        set { defaults.set(newValue, forKey: Key.displayRanges) }
     }
 
     /// Send nothing while any app uses the camera or microphone. On by default.

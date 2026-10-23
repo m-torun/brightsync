@@ -23,6 +23,7 @@ final class SyncEngineTests {
         engine = SyncEngine(bus: bus, gate: gate,
                             now: { [clock] in clock.time },
                             settings: { [unowned self] in self.settings },
+                            ranges: [:], saveRanges: { _ in },
                             log: { [unowned self] in self.logged.append($0) })
     }
 
@@ -415,5 +416,34 @@ final class SyncEngineTests {
         engine.receiveAmbient(90, exact: true)
         engine.tick()
         #expect(bus.transactions == ["write Dell \(brightness)=90"])
+    }
+
+    // MARK: - Known ranges
+
+    @Test func afterWakeASensorTargetIsOneWriteWhenTheRangeIsKnown() {
+        settings.followsSensor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        bus.reset()
+        gate.record(.screensSlept)
+        gate.record(.screensWoke)
+        engine.receiveAmbient(12, exact: false)
+        clock.advance(60)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=12", "write Lenovo \(brightness)=12"],
+                "no read, so no garbled first read to wait out")
+    }
+
+    @Test func aGarbledFirstReadDoesNotDelayAKnownDisplay() {
+        settings.followsSensor = true
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        gate.record(.reconfigured)
+        bus["Dell"].garbled = [brightness]
+        bus.reset()
+        engine.receiveAmbient(12, exact: false)
+        clock.advance(60)
+        engine.tick()
+        #expect(bus.transactions.contains("write Dell \(brightness)=12"))
     }
 }

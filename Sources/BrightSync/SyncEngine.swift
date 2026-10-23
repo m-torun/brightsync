@@ -96,6 +96,11 @@ final class SyncEngine {
     /// whenever the gate sees an event.
     private var known: [String: (current: Int, max: Int)] = [:]
     private var unsupported: Set<String> = []
+    /// Each display's brightness range. Unlike its current value, it does not
+    /// change, so it is kept across events and launches, and a display whose
+    /// range is known is written to without being read first.
+    private var ranges: [String: Int]
+    private let saveRanges: ([String: Int]) -> Void
     /// Colour preset lists are sparse: a display may ignore a value or swap in
     /// another. Those are remembered so they are not rewritten every round.
     private var rejectedPresets: Set<String> = []
@@ -120,12 +125,16 @@ final class SyncEngine {
          queue: DispatchQueue = DispatchQueue(label: "app.brightsync.ddc", qos: .utility),
          now: @escaping () -> TimeInterval = DisplayGate.uptime,
          settings: @escaping () -> SyncSettings = { .current },
+         ranges: [String: Int] = Preferences.displayRanges,
+         saveRanges: @escaping ([String: Int]) -> Void = { Preferences.displayRanges = $0 },
          log: @escaping (String) -> Void = Log.write) {
         self.bus = bus
         self.gate = gate
         self.queue = queue
         self.now = now
         self.settings = settings
+        self.ranges = ranges
+        self.saveRanges = saveRanges
         self.log = log
     }
 
@@ -263,7 +272,7 @@ final class SyncEngine {
             return false
         }
         for display in displays {
-            follow(display, fraction: ambient.percent / 100, deadband: ambient.exact ? 0 : round.deadband)
+            follow(display, fraction: ambient.percent / 100, deadband: ambient.exact ? 0 : round.deadband, writeBlind: true)
         }
         return true
     }
@@ -296,7 +305,17 @@ final class SyncEngine {
     /// Brightness is continuous and each panel has its own range, so the
     /// proportion is what is matched, not the raw value. A display is read
     /// once after it settles; after that, only written to.
-    private func follow(_ display: Display, fraction: Double, deadband: Int) {
+    private func follow(_ display: Display, fraction: Double, deadband: Int, writeBlind: Bool = false) {
+        let key = cacheKey(display, DDCKIT_VCP_BRIGHTNESS)
+        if writeBlind, known[key] == nil, let max = ranges[key] {
+            // A sensor sets the target, so after an event the display most
+            // likely needs it anyway: one write, and no read first that
+            // might come back garbled. Following a display, the follower
+            // usually still has the right value, so it is read instead of
+            // being written to for nothing.
+            write(display, DDCKIT_VCP_BRIGHTNESS, Int((fraction * Double(max)).rounded()))
+            return
+        }
         guard let current = read(display, DDCKIT_VCP_BRIGHTNESS, fresh: false) else { return }
         let wanted = Int((fraction * Double(current.max)).rounded())
         if abs(current.current - wanted) > deadband {
@@ -345,6 +364,10 @@ final class SyncEngine {
             backoff[display.key] = nil
             readBackoff[key] = nil
             known[key] = (current, max)
+            if vcp == DDCKIT_VCP_BRIGHTNESS, ranges[key] != max {
+                ranges[key] = max
+                saveRanges(ranges)
+            }
             return (current, max)
         case .unsupported:
             unsupported.insert(key)
@@ -367,7 +390,7 @@ final class SyncEngine {
         }
         backoff[display.key] = nil
         let key = cacheKey(display, vcp)
-        if let max = known[key]?.max {
+        if let max = known[key]?.max ?? (vcp == DDCKIT_VCP_BRIGHTNESS ? ranges[key] : nil) {
             known[key] = (value, max)
         }
         return true

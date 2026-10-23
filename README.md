@@ -188,9 +188,11 @@ In a steady state that is one DDC read per round (two with color sync on) and
 no writes. With a single display, or with sync switched off, BrightSync sends
 nothing at all.
 
-When following a light sensor there are no periodic reads at all: each display
-is read once after it settles, then written to only when the target moves by
-more than a point (by any amount when you move the slider). A slider being
+When following a light sensor there are no periodic reads at all. Each
+display is read once, the first time it is seen, to learn its brightness
+range, which is remembered across wakes and launches. After that a new target
+is a single write, sent only when it moves by more than a point (by any amount
+when you move the slider). A slider being
 dragged is coalesced into at most one round every tenth of a second.
 
 All DDC traffic runs on a background queue; a single read takes roughly 100 ms.

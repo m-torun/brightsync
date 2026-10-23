@@ -46,6 +46,17 @@ open /Applications/BrightSync.app
 
 An app built on your own Mac opens without any Gatekeeper prompt.
 
+The first build creates a code signing certificate called "BrightSync Local
+Signing" in your login keychain, and every build on that Mac is signed with
+it. macOS remembers some permissions by an app's signature, and an ad-hoc
+signature changes with every build; with this one, local network access (for
+the Hue bridge) carries over from build to build. The Keychain is stricter:
+for apps not signed by an Apple-issued certificate it also tracks the exact
+build, so after each update BrightSync asks once more to read its Hue key.
+The certificate never leaves your Mac. To sign ad hoc instead, build with
+`BRIGHTSYNC_ADHOC=1 ./build.sh`; to remove the certificate, delete it in
+Keychain Access.
+
 The [latest release](https://github.com/m-torun/brightsync/releases/latest)
 has the same app prebuilt. It is signed ad hoc rather than with an Apple
 Developer ID and is not notarized, so macOS refuses to open it, saying it

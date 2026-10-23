@@ -29,28 +29,24 @@ screen — and you want the rest of the desk to match.
 
 ## Install
 
-```sh
-brew tap m-torun/tap
-brew install --cask brightsync
-```
-
-BrightSync is signed ad hoc rather than with an Apple Developer ID, so macOS
-blocks the first launch. Open it once with `open /Applications/BrightSync.app`,
-then allow it under System Settings → Privacy & Security → **Open Anyway**.
-
-Or [download the latest release](https://github.com/m-torun/brightsync/releases/latest)
-and drag `BrightSync.app` to Applications.
-
-### Building from source
-
-No Xcode needed, just the Swift toolchain that ships with the Command Line
-Tools:
+Build it from source. No Xcode needed, just the Swift toolchain that ships
+with the Command Line Tools (`xcode-select --install`):
 
 ```sh
+git clone https://github.com/m-torun/brightsync.git
+cd brightsync
 ./build.sh
 cp -R BrightSync.app /Applications/
 open /Applications/BrightSync.app
 ```
+
+An app built on your own Mac opens without any Gatekeeper prompt.
+
+The [latest release](https://github.com/m-torun/brightsync/releases/latest)
+has the same app prebuilt. It is signed ad hoc rather than with an Apple
+Developer ID and is not notarized, so macOS refuses to open it, saying it
+cannot verify that the app is free of malware. If you would rather not build,
+allow it once under System Settings → Privacy & Security → **Open Anyway**.
 
 ## Using it
 

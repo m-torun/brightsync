@@ -65,11 +65,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let problem = model.ambient.problem, model.ambient.lux != nil {
                 menu.addItem(disabledItem(problem))
             }
-            let together = NSMenuItem(title: "Adjust monitors together", action: #selector(toggleTogether), keyEquivalent: "")
-            together.target = self
-            together.state = model.adjustTogether ? .on : .off
-            together.toolTip = "One slider for every monitor, or one each, like the SYNC button of a car's climate control."
-            menu.addItem(together)
         } else if let paused = model.pausedReason {
             menu.addItem(disabledItem(paused))
         }
@@ -152,10 +147,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleEnabled() {
         model.isEnabled.toggle()
-    }
-
-    @objc private func toggleTogether() {
-        model.adjustTogether.toggle()
     }
 
     @objc private func toggleColor() {

@@ -127,8 +127,8 @@ the menu moves that up or down, from -50 to +50 points, at every light level:
 at +10 the monitors are always 10 points brighter than the default, whatever
 the light. 0 is the default, and the slider snaps to it when you get close.
 
-**Adjust monitors together** works like the SYNC button of a car's climate
-control. When it is on, one slider moves every monitor. When it is off, each
+**Adjust monitors together** in Settings works like the SYNC button of a
+car's climate control. When it is on, one slider moves every monitor. When it is off, each
 monitor gets its own slider, starting from the shared value, so two panels
 that look different at the same percentage can be evened out. Settings shows
 the light, the default for it, each monitor's offset and the brightness it

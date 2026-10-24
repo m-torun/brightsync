@@ -66,13 +66,20 @@ allow it once under System Settings → Privacy & Security → **Open Anyway**.
 ## Using it
 
 A sun icon appears in the menu bar. The menu is kept short: what brightness is
-following (with a brightness slider when that is a light sensor), a switch to
-pause syncing, and **Settings…**.
+following (with brightness sliders when that is a light sensor), switches for
+**Sync brightness** and **Sync color**, and **Settings…**. Opening the app
+again while it runs also opens Settings.
 
-The Settings window holds the rest: what brightness follows, how often a
-source display is checked, which display the color preset is copied from, the
-displays and their current brightness, light sensors and pairing, and
-**Start at login**.
+The Settings window holds the rest, in four tabs:
+
+- **Brightness:** what brightness follows (a display or a light sensor), how
+  often a source display is checked, and, for a sensor, the light, the
+  default for it and the offset sliders, together or per monitor.
+- **Color:** whether to copy the color preset, and from which display.
+- **Sensors:** the light sensors BrightSync knows, and **Add Sensor** to set
+  one up.
+- **General:** **Start at login**, **Pause during calls**, the displays and
+  their current brightness, and the log.
 
 The first line of the menu says when BrightSync is holding off, for example
 `Paused: displays asleep` or `Waiting for displays to settle (42 s)`. It waits
@@ -104,7 +111,7 @@ helps when a monitor's own sensor will not go as bright or as dim as you want,
 or when no monitor has one. BrightSync ships with support for the light sensor
 in Philips Hue motion sensors.
 
-1. In Settings, under **Light sensors**, click **Pair a Bridge…**, press the
+1. In Settings → **Sensors**, choose **Add Sensor ▸ Philips Hue…**, press the
    round link button on top of the bridge, and click **Pair** within 30 seconds.
    macOS asks whether BrightSync may find devices on your local network; it
    needs that to reach the bridge. The key the bridge hands out is kept in your
@@ -128,9 +135,9 @@ at +10 the monitors are always 10 points brighter than the default, whatever
 the light. 0 is the default, and the slider snaps to it when you get close.
 
 **Adjust monitors together** in Settings works like the SYNC button of a
-car's climate control. When it is on, one slider moves every monitor. When it is off, each
-monitor gets its own slider, starting from the shared value, so two panels
-that look different at the same percentage can be evened out. Settings shows
+car's climate control. When it is on, one slider moves every monitor. When it
+is off, each monitor gets its own slider, starting from the shared value, so
+two panels that look different at the same percentage can be evened out. Settings shows
 the light, the default for it, each monitor's offset and the brightness it
 ends up with, and **Reset to Default** puts everything back to 0.
 
@@ -179,6 +186,13 @@ loop. Reconnecting a display clears those memories.
 
 Note that on some monitors each color preset carries its own brightness, so
 changing the preset can change brightness too.
+
+BrightSync does not change color temperature with the light. For warmer
+colors in the evening, macOS's Night Shift (Windows' Night Light) warms the
+picture on its way to every monitor, so they stay matched, as long as it
+reaches your monitors: Apple only guarantees it on some displays. If a monitor
+has its own automatic color temperature, turn that off, or the two add up and
+that monitor drifts from the others.
 
 ## How it works
 

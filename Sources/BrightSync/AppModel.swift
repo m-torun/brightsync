@@ -27,6 +27,10 @@ final class AppModel: ObservableObject {
     func start() {
         engine.onStatus = { [weak self] status in
             self?.status = status
+            let seen = status.readings.map { (key: $0.key, name: $0.name) }
+            if !seen.isEmpty, seen.map(\.key) != Preferences.knownDisplays.map(\.key) {
+                Preferences.knownDisplays = seen
+            }
         }
         ambient.onChange = { [weak self] in
             self?.objectWillChange.send()
@@ -143,9 +147,15 @@ final class AppModel: ObservableObject {
         Preferences.sourceSensor != nil
     }
 
-    /// The displays seen in the last round.
+    /// The displays seen in the last round. Until the first round after a
+    /// launch, the ones seen last time, so their sliders are there at once.
     var displays: [DisplayReading] {
-        status.readings
+        if !status.readings.isEmpty {
+            return status.readings
+        }
+        return Preferences.knownDisplays.map {
+            DisplayReading(key: $0.key, name: $0.name, percent: nil, colorPreset: nil, isSource: false)
+        }
     }
 
     /// Why nothing is being sent right now, if that is the case.

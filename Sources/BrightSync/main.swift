@@ -115,15 +115,22 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
     if !following {
         demo["sourceSensorID"] = "demo:desk"
     }
+
+    // `--not-reached` draws it before any display has been reached, as
+    // just after a launch; the displays come from the ones seen last time.
+    let notReached = CommandLine.arguments.contains("--not-reached")
+    if notReached {
+        demo["knownDisplays"] = [["uuid-dell", "DELL U3225QE"], ["uuid-lenovo", "LEN T27p-10"]]
+    }
     UserDefaults.standard.setVolatileDomain(demo, forName: UserDefaults.argumentDomain)
 
     NSApplication.shared.setActivationPolicy(.prohibited)
     let model = AppModel(providers: [DemoSensors()])
-    model.show(SyncStatus(readings: [
+    model.show(SyncStatus(readings: notReached ? [] : [
         DisplayReading(key: "uuid-dell", name: "DELL U3225QE", percent: 80, colorPreset: 5, isSource: following),
         DisplayReading(key: "uuid-lenovo", name: "LEN T27p-10", percent: 80, colorPreset: 5, isSource: false),
     ]))
-    let suffix = (following ? "-display" : "") + (separate ? "-separate" : "")
+    let suffix = (following ? "-display" : "") + (separate ? "-separate" : "") + (notReached ? "-not-reached" : "")
     // Light mode on the window's own background, whatever the Mac is set to.
     func save(_ view: NSView, as name: String) {
         guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }

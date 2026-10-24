@@ -18,6 +18,7 @@ enum Preferences {
         static let hueHosts = "hueBridgeHosts"
         static let pauseDuringCalls = "pauseDuringCalls"
         static let displayRanges = "displayBrightnessRanges"
+        static let knownDisplays = "knownDisplays"
     }
 
     /// How often the source display is read. Every read goes through the
@@ -89,6 +90,17 @@ enum Preferences {
     static var colorSource: String? {
         get { defaults.string(forKey: Key.colorSource) ?? sourceDisplay }
         set { defaults.set(newValue, forKey: Key.colorSource) }
+    }
+
+    /// The displays seen last, as (key, name), so their sliders can be shown
+    /// before BrightSync has reached them after a launch.
+    static var knownDisplays: [(key: String, name: String)] {
+        get {
+            (defaults.array(forKey: Key.knownDisplays) as? [[String]] ?? []).compactMap { pair in
+                pair.count == 2 ? (pair[0], pair[1]) : nil
+            }
+        }
+        set { defaults.set(newValue.map { [$0.key, $0.name] }, forKey: Key.knownDisplays) }
     }
 
     /// Each display's brightness maximum, learned from its first good read.

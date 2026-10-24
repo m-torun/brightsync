@@ -63,6 +63,31 @@ struct HueModelTests {
         #expect(envelopes[0].resources[1].light?.light_level_report?.light_level == 18072)
     }
 
+    @Test func aSensorTurnedOffInTheHueAppHasNoReading() throws {
+        let levels = """
+        {"errors": [], "data": [
+          {"id": "ll-1", "type": "light_level", "enabled": false,
+           "owner": {"rid": "dev-1", "rtype": "device"},
+           "light": {"light_level_valid": false}}
+        ]}
+        """
+        let sensors = Hue.sensors(bridgeID: "ABCDEF0123456789",
+                                  lightLevels: try JSONDecoder().decode(HueEnvelope.self, from: Data(levels.utf8)).resources,
+                                  devices: [])
+        #expect(sensors[0].lux == nil)
+        #expect(sensors[0].unavailable == "turned off in the Hue app")
+    }
+
+    @Test func anOrdinaryReadingCarryingTheValidFlagIsNotAStateChange() throws {
+        let event = """
+        [{"type": "update", "data": [{"id": "ll-1", "type": "light_level",
+          "light": {"light_level": 15335, "light_level_valid": true,
+                    "light_level_report": {"changed": "2026-10-24T02:16:14Z", "light_level": 15335}}}]}]
+        """
+        let resource = try JSONDecoder().decode([HueEnvelope].self, from: Data(event.utf8))[0].resources[0]
+        #expect(Hue.unavailable(resource) == nil)
+    }
+
     @Test func bothPhilipsRootsLoad() {
         #expect(HueTrust.roots.count == 2)
     }

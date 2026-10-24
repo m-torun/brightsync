@@ -178,7 +178,7 @@ private struct SensorsPane: View {
                     ForEach(model.ambient.sensors) { choice in
                         VStack(alignment: .leading, spacing: 1) {
                             Text(choice.sensor.name)
-                            Text("\(choice.provider) · " + (choice.sensor.lux.map { "\(HueBridge.format($0)) lux" } ?? "no reading yet"))
+                            Text("\(choice.provider) · " + (choice.sensor.lux.map { "\(HueBridge.format($0)) lux" } ?? choice.sensor.unavailable ?? "no reading yet"))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }

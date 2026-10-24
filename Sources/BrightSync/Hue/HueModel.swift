@@ -18,11 +18,15 @@ struct HueResource: Decodable {
         }
 
         let light_level_report: Report?
+        /// False while the sensor has nothing trustworthy to report.
+        let light_level_valid: Bool?
     }
 
     let id: String
     let type: String
     let owner: Reference?
+    /// False when the sensor is turned off in the Hue app.
+    let enabled: Bool?
     let metadata: Metadata?
     let light: Light?
 }
@@ -70,11 +74,24 @@ enum Hue {
         let names = Dictionary(devices.map { ($0.id, $0.metadata?.name) }, uniquingKeysWith: { first, _ in first })
         return lightLevels.filter { $0.type == "light_level" }.map { resource in
             let report = resource.light?.light_level_report
+            let problem = unavailable(resource)
             return LightSensor(id: sensorID(bridgeID: bridgeID, resource: resource.id),
                                name: resource.owner.flatMap { names[$0.rid] ?? nil } ?? "Hue light sensor",
-                               lux: report.map { lux(fromLightLevel: $0.light_level) },
-                               updated: date(report?.changed))
+                               lux: problem == nil ? report.map { lux(fromLightLevel: $0.light_level) } : nil,
+                               updated: date(report?.changed),
+                               unavailable: problem)
         }
+    }
+
+    /// Why a light_level resource has no usable reading, if it has none.
+    static func unavailable(_ resource: HueResource) -> String? {
+        if resource.enabled == false {
+            return "turned off in the Hue app"
+        }
+        if resource.light?.light_level_valid == false {
+            return "not reporting a valid light level"
+        }
+        return nil
     }
 
     static func sensorID(bridgeID: String, resource: String) -> String {

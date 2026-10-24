@@ -129,7 +129,7 @@ final class HueBridge: NSObject, URLSessionDataDelegate {
                 snapshot.sensors = Hue.sensors(bridgeID: id, lightLevels: levels, devices: devices)
                 snapshot.problem = nil
                 for sensor in snapshot.sensors where !previous.contains(sensor) {
-                    log("hue: \(sensor.name) \(Self.format(sensor.lux)) lux")
+                    log("hue: \(sensor.name) " + (sensor.unavailable.map { "is \($0)" } ?? "\(Self.format(sensor.lux)) lux"))
                 }
                 publish()
                 openStream(from: host)
@@ -251,8 +251,19 @@ final class HueBridge: NSObject, URLSessionDataDelegate {
                     return start()
                 }
                 let sensorID = Hue.sensorID(bridgeID: id, resource: resource.id)
+                guard let index = snapshot.sensors.firstIndex(where: { $0.id == sensorID }) else { continue }
+                // Ordinary readings carry the valid flag too, so only a change
+                // counts: turned off or back on in the Hue app. Then the
+                // sensor's whole state is fetched again rather than pieced
+                // together from events.
+                let carriesState = resource.enabled != nil || resource.light?.light_level_valid != nil
+                let problem = Hue.unavailable(resource)
+                if carriesState, (problem == nil) != (snapshot.sensors[index].unavailable == nil) {
+                    log("hue: \(snapshot.sensors[index].name) \(problem.map { "is \($0)" } ?? "is reporting again")")
+                    return start()
+                }
                 guard let report = resource.light?.light_level_report,
-                      let index = snapshot.sensors.firstIndex(where: { $0.id == sensorID }) else { continue }
+                      snapshot.sensors[index].unavailable == nil else { continue }
                 let lux = Hue.lux(fromLightLevel: report.light_level)
                 snapshot.sensors[index].lux = lux
                 snapshot.sensors[index].updated = Hue.date(report.changed) ?? Date()

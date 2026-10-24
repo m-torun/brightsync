@@ -64,9 +64,11 @@ if let flag = CommandLine.arguments.firstIndex(of: "--sensors") {
     var lastProblem: String?
     hue.onChange = {
         let time = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime])
-        for sensor in hue.sensors where shown[sensor.id] != HueBridge.format(sensor.lux) {
-            shown[sensor.id] = HueBridge.format(sensor.lux)
-            print("\(time)  \(sensor.name): \(HueBridge.format(sensor.lux)) lux  [\(sensor.id)]")
+        for sensor in hue.sensors {
+            let reading = sensor.unavailable ?? "\(HueBridge.format(sensor.lux)) lux"
+            guard shown[sensor.id] != reading else { continue }
+            shown[sensor.id] = reading
+            print("\(time)  \(sensor.name): \(reading)  [\(sensor.id)]")
         }
         if hue.problem != lastProblem, let problem = hue.problem {
             print("\(time)  \(problem)")

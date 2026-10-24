@@ -212,6 +212,9 @@ final class AppModel: ObservableObject {
         if let sensor = ambient.selected, let lux = sensor.lux {
             return "\(sensor.name) · \(HueBridge.format(lux)) lux"
         }
+        if let sensor = ambient.selected, let reason = sensor.unavailable {
+            return "\(sensor.name) is \(reason)"
+        }
         return ambient.problem ?? "Waiting for the light sensor…"
     }
 

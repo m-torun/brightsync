@@ -121,8 +121,12 @@ final class AmbientController {
     /// while the average catches up.
     private func smooth() {
         guard let sensor = selected, let current = sensor.lux else {
+            // No reading (turned off, unreachable): start afresh when one
+            // comes back, rather than count the old one as having held.
             catchUp?.invalidate()
             catchUp = nil
+            smoother.reset()
+            lastReading = nil
             return
         }
         if sensor.id != smoothedSensor {

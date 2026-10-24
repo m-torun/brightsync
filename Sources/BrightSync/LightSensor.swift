@@ -9,6 +9,9 @@ struct LightSensor: Equatable {
     var lux: Double?
     /// When the sensor took that reading.
     var updated: Date?
+    /// Why there is no usable reading, e.g. "turned off in the Hue app".
+    /// Brightness is left where it is meanwhile.
+    var unavailable: String?
 }
 
 /// A kind of light sensor. BrightSync ships with Philips Hue; another kind

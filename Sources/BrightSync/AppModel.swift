@@ -179,7 +179,7 @@ final class AppModel: ObservableObject {
         ambient.defaultPercent.map { Int($0.rounded()) }
     }
 
-    /// "Hallway Motion Sensor · 38 lux", or why there is no reading.
+    /// "Desk sensor · 38 lux", or why there is no reading.
     var lightCaption: String {
         if let sensor = ambient.selected, let lux = sensor.lux {
             return "\(sensor.name) · \(HueBridge.format(lux)) lux"

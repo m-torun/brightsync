@@ -104,6 +104,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var smoothLight: Bool {
+        get { Preferences.smoothLight }
+        set {
+            objectWillChange.send()
+            Preferences.smoothLight = newValue
+            ambient.update()
+        }
+    }
+
+    /// "3.3 lux", or "3.3 lux now, 2.4 averaged" while smoothing catches up.
+    var lightDescription: String? {
+        guard let current = ambient.currentLux, let lux = ambient.lux else { return nil }
+        if abs(lux - current) / current < 0.05 {
+            return "\(HueBridge.format(current)) lux"
+        }
+        return "\(HueBridge.format(current)) lux now, \(HueBridge.format(lux)) averaged"
+    }
+
     var pauseDuringCalls: Bool {
         get { Preferences.pauseDuringCalls }
         set {

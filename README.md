@@ -126,6 +126,17 @@ including a single one. While BrightSync is holding off (after a wake or a
 display change, during a call), the slider's caption says so and counts down;
 whatever you set is applied when it may send again.
 
+### Smoothing
+
+Light readings wobble, especially in a dim room, and brightness follows them
+on a log scale, so a wobble between 1.3 and 3.3 lux would move the monitors
+by several points every few minutes. With **Smooth small changes** (Settings →
+Brightness, on by default), brightness follows the light averaged over the
+last 5 minutes, weighted by how long each reading held, so small changes ramp
+in gently and wobbles cancel out. A reading more than four times brighter or
+darker than the average, such as a lamp switched on at night, replaces the
+average and applies at once.
+
 ### Brighter or dimmer than the default
 
 Out of the box, brightness rises 25 points for every tenfold increase in

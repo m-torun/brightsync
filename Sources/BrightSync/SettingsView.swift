@@ -77,10 +77,15 @@ private struct BrightnessPane: View {
 
             if model.followsSensor {
                 LabeledContent("Light:") {
-                    Text(model.ambient.lux.map { "\(HueBridge.format($0)) lux" } ?? model.lightCaption)
+                    Text(model.lightDescription ?? model.lightCaption)
                 }
                 LabeledContent("Default:") {
                     Text(model.defaultPercent.map { "\($0)% at this light" } ?? "–")
+                }
+                Toggle("Smooth small changes", isOn: $model.smoothLight)
+                LabeledContent("") {
+                    Note("Follows the light averaged over the last 5 minutes, so small changes do not keep nudging the monitors. A change of more than fourfold, such as a lamp switched on, applies at once.")
+                        .padding(.bottom, 4)
                 }
                 Toggle("Adjust monitors together", isOn: $model.adjustTogether)
                 if model.adjustTogether {

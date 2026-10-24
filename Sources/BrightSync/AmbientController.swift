@@ -14,12 +14,22 @@ final class AmbientController {
 
     private let engine: SyncEngine
     private let log: (String) -> Void
+    private let now: () -> TimeInterval
     private var lastLogged: String?
 
+    private var smoother = LightSmoother()
+    /// The sensor and reading last given to the smoother, to add each once.
+    private var smoothedSensor: String?
+    private var lastReading: (lux: Double, updated: Date?)?
+    /// Runs while the average is still catching up with the light.
+    private var catchUp: Timer?
+
     init(engine: SyncEngine, providers: [LightSensorProvider] = AmbientController.defaultProviders(),
+         now: @escaping () -> TimeInterval = DisplayGate.uptime,
          log: @escaping (String) -> Void = Log.write) {
         self.engine = engine
         self.providers = providers
+        self.now = now
         self.log = log
     }
 
@@ -56,8 +66,15 @@ final class AmbientController {
         return providers.lazy.flatMap(\.sensors).first { $0.id == id }
     }
 
-    var lux: Double? {
+    /// The latest reading.
+    var currentLux: Double? {
         selected?.lux
+    }
+
+    /// The light brightness follows: averaged when smoothing is on.
+    var lux: Double? {
+        guard let current = currentLux else { return nil }
+        return Preferences.smoothLight ? smoother.lux(at: now()) ?? current : current
     }
 
     /// What the default curve gives at the current light, before any offset.
@@ -76,7 +93,8 @@ final class AmbientController {
 
     /// Recomputes the targets after a reading or a settings change.
     func update(exact: Bool = false) {
-        guard Preferences.sourceSensor != nil, let lux else {
+        smooth()
+        guard Preferences.sourceSensor != nil, let lux, let current = currentLux else {
             lastLogged = nil
             engine.setAmbientTarget(nil)
             onChange?()
@@ -86,13 +104,48 @@ final class AmbientController {
         let target = AmbientTarget(percent: offsets.percent(for: "", at: lux),
                                    perDisplay: offsets.together ? [:] : offsets.perDisplay.mapValues { min(max(AmbientCurve.percent(at: lux) + $0, 0), 100) },
                                    exact: exact)
-        let summary = "\(HueBridge.format(lux)) lux → \(Int(AmbientCurve.percent(at: lux).rounded()))%" + describe(offsets)
-        if !exact, summary != lastLogged {
+        let light = abs(lux - current) / current < 0.05 ? "\(HueBridge.format(current)) lux"
+            : "\(HueBridge.format(current)) lux (averaging \(HueBridge.format(lux)))"
+        let summary = "\(light) → \(Int(AmbientCurve.percent(at: lux).rounded()))%" + describe(offsets)
+        // Log when the brightness changes, not every step of the average.
+        let logKey = summary.components(separatedBy: " → ").last
+        if !exact, logKey != lastLogged {
             log("ambient: \(summary)")
-            lastLogged = summary
+            lastLogged = logKey
         }
         engine.setAmbientTarget(target)
         onChange?()
+    }
+
+    /// Feeds each new reading to the smoother once, and keeps recomputing
+    /// while the average catches up.
+    private func smooth() {
+        guard let sensor = selected, let current = sensor.lux else {
+            catchUp?.invalidate()
+            catchUp = nil
+            return
+        }
+        if sensor.id != smoothedSensor {
+            smoother.reset()
+            smoothedSensor = sensor.id
+            lastReading = nil
+        }
+        if lastReading?.lux != current || lastReading?.updated != sensor.updated {
+            let before = smoother.lux(at: now())
+            if smoother.add(lux: current, at: now()), Preferences.smoothLight, let before {
+                log("ambient: light jumped from \(HueBridge.format(before)) to \(HueBridge.format(current)) lux; following at once")
+            }
+            lastReading = (current, sensor.updated)
+        }
+        let settled = !Preferences.smoothLight || smoother.isSettled(at: now())
+        if settled {
+            catchUp?.invalidate()
+            catchUp = nil
+        } else if catchUp == nil {
+            let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in self?.update() }
+            RunLoop.main.add(timer, forMode: .common)
+            catchUp = timer
+        }
     }
 
     /// A slider: moves one display, or every display when they are adjusted

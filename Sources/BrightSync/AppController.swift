@@ -19,7 +19,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "BrightSync")
+        // A little larger than the default symbol size, to match the icons around it.
+        let symbol = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        statusItem.button?.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "BrightSync")?
+            .withSymbolConfiguration(symbol)
         statusItem.button?.image?.isTemplate = true
 
         let menu = NSMenu()

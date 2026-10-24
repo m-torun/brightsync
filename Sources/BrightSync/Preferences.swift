@@ -19,6 +19,7 @@ enum Preferences {
         static let pauseDuringCalls = "pauseDuringCalls"
         static let displayRanges = "displayBrightnessRanges"
         static let knownDisplays = "knownDisplays"
+        static let smoothLight = "smoothLight"
     }
 
     /// How often the source display is read. Every read goes through the
@@ -107,6 +108,13 @@ enum Preferences {
     static var displayRanges: [String: Int] {
         get { defaults.dictionary(forKey: Key.displayRanges) as? [String: Int] ?? [:] }
         set { defaults.set(newValue, forKey: Key.displayRanges) }
+    }
+
+    /// Follow the light averaged over 5 minutes, with big changes at once.
+    /// On by default.
+    static var smoothLight: Bool {
+        get { defaults.object(forKey: Key.smoothLight) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.smoothLight) }
     }
 
     /// Send nothing while any app uses the camera or microphone. On by default.

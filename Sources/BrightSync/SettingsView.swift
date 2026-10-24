@@ -1,4 +1,3 @@
-import Charts
 import SwiftUI
 
 /// The Settings window: one tab per area, laid out the way Mac settings
@@ -78,34 +77,24 @@ private struct BrightnessPane: View {
 
             if model.followsSensor {
                 LabeledContent("Light:") {
-                    Text(model.ambient.selected?.lux.map { "\(HueBridge.format($0)) lux" } ?? model.sensorCaption)
+                    Text(model.ambient.lux.map { "\(HueBridge.format($0)) lux" } ?? model.lightCaption)
                 }
-                LabeledContent("Brightness:") {
-                    HStack {
-                        Slider(value: brightness, in: 0...100) { editing in
-                            if !editing, let percent = model.brightness {
-                                model.setBrightness(percent, finished: true)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 260)
-                        Text(model.brightness.map { "\(Int($0.rounded()))%" } ?? "–")
-                            .monospacedDigit()
-                            .frame(width: 40, alignment: .leading)
+                LabeledContent("Default:") {
+                    Text(model.defaultPercent.map { "\($0)% at this light" } ?? "–")
+                }
+                Toggle("Adjust monitors together", isOn: $model.adjustTogether)
+                if model.adjustTogether {
+                    offsetRow("Brightness:", display: nil)
+                } else {
+                    ForEach(model.displays, id: \.key) { display in
+                        offsetRow("\(display.name):", display: display.key)
                     }
-                    .disabled(model.brightness == nil)
-                }
-                LabeledContent("Curve:") {
-                    CurveChart(curve: model.ambient.curve, lux: model.ambient.selected?.lux, percent: model.brightness)
-                        .frame(width: 340, height: 160)
-                        // Line the label up with the top of the chart, not its axis labels.
-                        .alignmentGuide(.firstTextBaseline) { $0[.top] + 10 }
                 }
                 LabeledContent("") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Note("Moving the slider pins the curve to that brightness at the current light. Set it again in other light, in the evening or on a bright afternoon, to shape it. Beyond your pins it rises 25 points for every tenfold increase in light.")
-                        Button("Reset Curve") { model.resetCurve() }
-                            .disabled(model.ambient.curve.points.isEmpty)
+                        Note("The default rises 25 points for every tenfold increase in light: 10% at 1 lux, 60% at 100 lux, 100% from about 1800 lux. The slider moves it up or down at every light level; 0 is the default.")
+                        Button("Reset to Default") { model.resetOffsets() }
+                            .disabled(model.offsets.shared == 0 && model.offsets.perDisplay.values.allSatisfy { $0 == 0 })
                     }
                 }
             } else {
@@ -120,9 +109,32 @@ private struct BrightnessPane: View {
         .formStyle(.columns)
     }
 
-    private var brightness: Binding<Double> {
-        Binding(get: { model.brightness ?? 50 },
-                set: { model.setBrightness($0.rounded(), finished: false) })
+    /// A slider from -50 to +50 around the default curve, with the
+    /// brightness it gives right now.
+    private func offsetRow(_ label: String, display: String?) -> some View {
+        LabeledContent(label) {
+            HStack {
+                OffsetSlider(value: offset(display)) {
+                    model.setOffset(model.offsets.offset(for: display ?? ""), display: display, finished: true)
+                }
+                .frame(width: 220)
+                Text(AmbientController.signed(model.offsets.offset(for: display ?? "")) + "%")
+                    .monospacedDigit()
+                    .frame(width: 44, alignment: .trailing)
+                Text(model.resultPercent(for: display).map { "→ \($0)%" } ?? "")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(model.ambient.lux == nil)
+        }
+    }
+
+    private func offset(_ display: String?) -> Binding<Double> {
+        Binding(get: { model.offsets.offset(for: display ?? "") },
+                set: { value in
+                    // Close to the middle means the default.
+                    model.setOffset(abs(value) < 2.5 ? 0 : value.rounded(), display: display, finished: false)
+                })
     }
 }
 
@@ -223,57 +235,42 @@ private struct GeneralPane: View {
     }
 }
 
-/// Brightness against light, on a log scale: the curve, the user's pins, and
-/// where the current reading sits.
-struct CurveChart: View {
-    let curve: AmbientCurve
-    let lux: Double?
-    let percent: Double?
+/// The same offset slider as in the menu: centred on 0, no fill, a mark in
+/// the middle. `finished` runs when the mouse is released.
+private struct OffsetSlider: NSViewRepresentable {
+    @Binding var value: Double
+    var finished: () -> Void
 
-    private static let steps = Array(stride(from: 0.0, through: 5.0, by: 0.05))
+    func makeNSView(context: Context) -> NSSlider {
+        let slider = NSSlider.offset(range: BrightnessOffsets.range)
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.changed(_:))
+        return slider
+    }
 
-    var body: some View {
-        Chart {
-            ForEach(Self.steps, id: \.self) { x in
-                LineMark(x: .value("Light", x), y: .value("Brightness", curve.percent(at: pow(10, x))))
-            }
-            ForEach(curve.points, id: \.lux) { point in
-                PointMark(x: .value("Light", AmbientCurve.decades(point.lux)), y: .value("Brightness", point.percent))
-                    .symbolSize(40)
-            }
-            if let lux, let percent {
-                RuleMark(x: .value("Light", AmbientCurve.decades(lux)))
-                    .foregroundStyle(.orange.opacity(0.5))
-                PointMark(x: .value("Light", AmbientCurve.decades(lux)), y: .value("Brightness", percent))
-                    .foregroundStyle(.orange)
-                    .symbolSize(70)
-            }
-        }
-        .chartXScale(domain: 0...5)
-        .chartYScale(domain: 0...100)
-        .chartXAxis {
-            AxisMarks(values: [0.0, 1, 2, 3, 4, 5]) { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let x = value.as(Double.self) {
-                        Text(Self.luxLabel(x))
-                    }
-                }
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading, values: [0, 50, 100]) { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let y = value.as(Int.self) {
-                        Text("\(y)%")
-                    }
-                }
-            }
+    func updateNSView(_ slider: NSSlider, context: Context) {
+        context.coordinator.parent = self
+        if slider.doubleValue != value {
+            slider.doubleValue = value
         }
     }
 
-    private static func luxLabel(_ decades: Double) -> String {
-        ["1 lux", "10", "100", "1k", "10k", "100k"][min(max(Int(decades.rounded()), 0), 5)]
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject {
+        var parent: OffsetSlider
+
+        init(parent: OffsetSlider) {
+            self.parent = parent
+        }
+
+        @objc func changed(_ slider: NSSlider) {
+            parent.value = slider.doubleValue
+            if NSApp.currentEvent?.type == .leftMouseUp {
+                parent.finished()
+            }
+        }
     }
 }

@@ -39,6 +39,20 @@ enum ColorPreset {
     }
 }
 
+/// The brightness a light sensor asks for, in percent.
+struct AmbientTarget: Equatable {
+    /// For any display not listed in `perDisplay`.
+    var percent: Double
+    /// By display key, when monitors are adjusted separately.
+    var perDisplay: [String: Double] = [:]
+    /// Chosen with a slider, so even a one-point change is written.
+    var exact = false
+
+    func percent(for display: Display) -> Double {
+        perDisplay[display.key] ?? percent
+    }
+}
+
 /// The settings a round needs, read fresh at the start of each one.
 struct SyncSettings {
     var isEnabled = true
@@ -108,9 +122,8 @@ final class SyncEngine {
     /// Readings that came back unusable, per display and VCP code. Only that
     /// reading waits; writes to the display carry on.
     private var readBackoff: [String: (failures: Int, until: TimeInterval)] = [:]
-    /// The brightness a light sensor asks for, in percent. `exact` when the
-    /// user chose it with the slider, so even a one-point change is written.
-    private var ambient: (percent: Double, exact: Bool)?
+    /// The brightness a light sensor asks for.
+    private var ambient: AmbientTarget?
     private var ambientRoundPending = false
     /// The pause last logged, so each one is logged once.
     private var pausedFor: String?
@@ -155,9 +168,9 @@ final class SyncEngine {
     /// Sets the brightness to follow a light sensor, or nil when there is no
     /// reading. Rapid changes, such as a slider being dragged, are coalesced
     /// into one round, and the gate still decides whether it may run.
-    func setAmbientTarget(_ percent: Double?, exact: Bool = false) {
+    func setAmbientTarget(_ target: AmbientTarget?) {
         queue.async {
-            self.receiveAmbient(percent, exact: exact)
+            self.receiveAmbient(target)
             guard !self.ambientRoundPending else { return }
             self.ambientRoundPending = true
             self.queue.asyncAfter(deadline: .now() + 0.1) {
@@ -169,8 +182,13 @@ final class SyncEngine {
     }
 
     /// Runs on the queue; the tests call it directly.
+    func receiveAmbient(_ target: AmbientTarget?) {
+        ambient = target
+    }
+
+    /// The same target for every display.
     func receiveAmbient(_ percent: Double?, exact: Bool) {
-        ambient = percent.map { ($0, exact) }
+        receiveAmbient(percent.map { AmbientTarget(percent: $0, exact: exact) })
     }
 
     /// Seconds until the next round, or nil to wait for the event that ends a hold.
@@ -272,7 +290,7 @@ final class SyncEngine {
             return false
         }
         for display in displays {
-            follow(display, fraction: ambient.percent / 100, deadband: ambient.exact ? 0 : round.deadband, writeBlind: true)
+            follow(display, fraction: ambient.percent(for: display) / 100, deadband: ambient.exact ? 0 : round.deadband, writeBlind: true)
         }
         return true
     }

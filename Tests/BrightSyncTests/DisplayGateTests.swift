@@ -118,12 +118,23 @@ struct DisplayGateTests {
     @Test func aLockedScreenHoldsUntilUnlocked() {
         let gate = self.gate
         clock.advance(60)
+        let generation = gate.generation
         gate.record(.screenLocked)
         clock.advance(3_600)
         #expect(gate.state == .held("screen locked"))
         gate.record(.screenUnlocked)
+        #expect(gate.isOpen, "unlocking is not a display change: no quiet period")
+        #expect(gate.generation == generation)
+    }
+
+    @Test func unlockingDoesNotRestartAQuietPeriodUnderWay() {
+        let gate = self.gate
         clock.advance(60)
-        #expect(gate.isOpen)
+        gate.record(.reconfigured)
+        clock.advance(15)
+        gate.record(.screenUnlocked)
+        clock.advance(45)
+        #expect(gate.isOpen, "60 s after the display change, not after the unlock")
     }
 
     @Test func theDisplaySleepTimerIsReadFromPmset() {

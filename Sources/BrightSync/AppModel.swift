@@ -157,16 +157,43 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The brightness the curve asks for at the current light.
-    var brightness: Double? {
-        ambient.target
+    var offsets: BrightnessOffsets {
+        ambient.offsets
     }
 
-    var sensorCaption: String {
+    /// Like a car's SYNC button: one slider for every monitor, or one each.
+    var adjustTogether: Bool {
+        get { offsets.together }
+        set {
+            objectWillChange.send()
+            ambient.setTogether(newValue, displays: displays.map(\.key))
+        }
+    }
+
+    /// The brightness a display ends up with, or the shared one for nil.
+    func resultPercent(for display: String?) -> Int? {
+        ambient.percent(for: display ?? "").map { Int($0.rounded()) }
+    }
+
+    var defaultPercent: Int? {
+        ambient.defaultPercent.map { Int($0.rounded()) }
+    }
+
+    /// "Hallway Motion Sensor · 38 lux", or why there is no reading.
+    var lightCaption: String {
         if let sensor = ambient.selected, let lux = sensor.lux {
-            return "\(sensor.name) reads \(HueBridge.format(lux)) lux"
+            return "\(sensor.name) · \(HueBridge.format(lux)) lux"
         }
         return ambient.problem ?? "Waiting for the light sensor…"
+    }
+
+    /// Why a change made now would not reach the monitors yet, briefly.
+    var waitingNote: String? {
+        switch engine.gate.state {
+        case .open: return nil
+        case let .settling(remaining): return "applies in \(Int(remaining.rounded(.up))) s"
+        case let .held(reason), let .paused(reason): return "paused: \(reason)"
+        }
     }
 
     /// True when the chosen sensor is not on offer, e.g. in another room.
@@ -194,14 +221,15 @@ final class AppModel: ObservableObject {
 
     // MARK: - Actions
 
-    /// The slider: pins the curve to `percent` at the current light.
-    func setBrightness(_ percent: Double, finished: Bool) {
-        ambient.setBrightness(percent, finished: finished)
+    /// A slider: how many points brighter or dimmer than the default curve,
+    /// for one display or, when adjusted together, all of them.
+    func setOffset(_ offset: Double, display: String?, finished: Bool) {
+        ambient.setOffset(offset, display: display, finished: finished)
         objectWillChange.send()
     }
 
-    func resetCurve() {
-        ambient.resetCurve()
+    func resetOffsets() {
+        ambient.resetOffsets()
         objectWillChange.send()
     }
 

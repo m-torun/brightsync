@@ -12,7 +12,9 @@ enum Preferences {
         static let syncColor = "syncColorTemperature"
         static let colorSource = "colorSourceKey"
         static let sourceSensor = "sourceSensorID"
-        static let curves = "ambientCurves"
+        static let offsetsTogether = "adjustMonitorsTogether"
+        static let sharedOffset = "brightnessOffset"
+        static let displayOffsets = "displayBrightnessOffsets"
         static let hueHosts = "hueBridgeHosts"
         static let pauseDuringCalls = "pauseDuringCalls"
         static let displayRanges = "displayBrightnessRanges"
@@ -36,14 +38,19 @@ enum Preferences {
         set { defaults.set(newValue, forKey: Key.sourceSensor) }
     }
 
-    /// The brightness curve shaped with the slider, one per sensor, since
-    /// each sits in a different room or spot.
-    static var curves: [String: AmbientCurve] {
+    /// How far brightness is moved from the default curve: one offset for
+    /// every monitor, or one each.
+    static var offsets: BrightnessOffsets {
         get {
-            guard let data = defaults.data(forKey: Key.curves) else { return [:] }
-            return (try? JSONDecoder().decode([String: AmbientCurve].self, from: data)) ?? [:]
+            BrightnessOffsets(together: defaults.object(forKey: Key.offsetsTogether) as? Bool ?? true,
+                              shared: defaults.double(forKey: Key.sharedOffset),
+                              perDisplay: defaults.dictionary(forKey: Key.displayOffsets) as? [String: Double] ?? [:])
         }
-        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: Key.curves) }
+        set {
+            defaults.set(newValue.together, forKey: Key.offsetsTogether)
+            defaults.set(newValue.shared, forKey: Key.sharedOffset)
+            defaults.set(newValue.perDisplay, forKey: Key.displayOffsets)
+        }
     }
 
     /// Last known address of each paired Hue bridge, by bridge ID, so that

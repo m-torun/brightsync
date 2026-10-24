@@ -115,19 +115,24 @@ in Philips Hue motion sensors.
 
 The bridge pushes a new reading as soon as the light changes (every few seconds
 while it is changing), so nothing is polled. Every display follows the sensor,
-including a single one.
+including a single one. While BrightSync is holding off (after a wake or a
+display change, during a call), the slider's caption says so and counts down;
+whatever you set is applied when it may send again.
 
-### Shaping the curve
+### Brighter or dimmer than the default
 
-The menu shows a **Brightness** slider with the sensor's current reading
-under it, and Settings shows the whole curve. Out of the box, brightness rises 25 points for every tenfold increase
-in light: 10% at 1 lux, 60% at 100 lux, 100% from about 1800 lux. Moving the
-slider pins the curve to that brightness at the current light, and as the light
-changes the displays follow the curve through your pins. Set it again in other
-light, in the evening or on a bright afternoon, and the curve takes the shape
-you want. A pin that would make the curve dip as the light rises is dropped in
-favour of the newer one. **Reset Curve** in Settings goes back to the default.
-Each sensor keeps its own curve.
+Out of the box, brightness rises 25 points for every tenfold increase in
+light: 10% at 1 lux, 60% at 100 lux, 100% from about 1800 lux. The slider in
+the menu moves that up or down, from -50 to +50 points, at every light level:
+at +10 the monitors are always 10 points brighter than the default, whatever
+the light. 0 is the default, and the slider snaps to it when you get close.
+
+**Adjust monitors together** works like the SYNC button of a car's climate
+control. When it is on, one slider moves every monitor. When it is off, each
+monitor gets its own slider, starting from the shared value, so two panels
+that look different at the same percentage can be evened out. Settings shows
+the light, the default for it, each monitor's offset and the brightness it
+ends up with, and **Reset to Default** puts everything back to 0.
 
 ### Checking the sensors
 

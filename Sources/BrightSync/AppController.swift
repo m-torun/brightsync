@@ -11,8 +11,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var changes: AnyCancellable?
     /// Kept while the menu is open, so readings can update in place.
     private var menuIsOpen = false
-    private var sliderView: SliderMenuView?
+    /// The offset sliders shown, by display key (nil: all monitors together).
+    private var sliders: [(display: String?, view: SliderMenuView)] = []
     private var followingItem: NSMenuItem?
+    /// Ticks while the menu is open, so a countdown stays current.
+    private var openTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -35,7 +38,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Rebuilt each time it opens so the readings are current.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        sliderView = nil
+        sliders = []
         followingItem = nil
         // Whatever was wrong may just have been fixed (a permission granted,
         // the bridge plugged back in), so try now rather than after the back-off.
@@ -43,23 +46,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             model.ambient.refresh()
         }
 
-        if let paused = model.pausedReason {
-            menu.addItem(disabledItem(paused))
-        }
         if model.followsSensor {
-            let view = SliderMenuView(title: "Brightness")
-            view.onChange = { [weak self] percent, finished in
-                self?.model.setBrightness(percent, finished: finished)
+            // The slider captions say when changes are held back.
+            let keys: [String?] = model.adjustTogether ? [nil] : model.displays.map(\.key)
+            for (index, key) in keys.enumerated() {
+                let view = SliderMenuView(title: "Brightness", offsetRange: BrightnessOffsets.range,
+                                          captioned: index == keys.count - 1)
+                view.onChange = { [weak self] offset, finished in
+                    self?.model.setOffset(offset, display: key, finished: finished)
+                    self?.refreshOpenMenu()
+                }
+                sliders.append((key, view))
+                let item = NSMenuItem()
+                item.view = view
+                menu.addItem(item)
             }
-            sliderView = view
-            let item = NSMenuItem()
-            item.view = view
-            menu.addItem(item)
             // A problem while there is still a reading would not fit the caption.
-            if let problem = model.ambient.problem, model.ambient.selected?.lux != nil {
+            if let problem = model.ambient.problem, model.ambient.lux != nil {
                 menu.addItem(disabledItem(problem))
             }
-        } else if let line = model.followingLine {
+            let together = NSMenuItem(title: "Adjust monitors together", action: #selector(toggleTogether), keyEquivalent: "")
+            together.target = self
+            together.state = model.adjustTogether ? .on : .off
+            together.toolTip = "One slider for every monitor, or one each, like the SYNC button of a car's climate control."
+            menu.addItem(together)
+        } else if let paused = model.pausedReason {
+            menu.addItem(disabledItem(paused))
+        }
+        if !model.followsSensor, let line = model.followingLine {
             followingItem = disabledItem(line)
             menu.addItem(followingItem!)
         }
@@ -94,18 +108,35 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         menuIsOpen = true
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.refreshOpenMenu() }
+        // Menus track events in their own run loop mode.
+        RunLoop.main.add(timer, forMode: .common)
+        openTimer = timer
     }
 
     func menuDidClose(_ menu: NSMenu) {
         menuIsOpen = false
-        sliderView = nil
+        openTimer?.invalidate()
+        openTimer = nil
+        sliders = []
         followingItem = nil
     }
 
     /// Updates readings in place while the menu is open, instead of leaving
     /// what was true when it opened.
     private func refreshOpenMenu() {
-        sliderView?.show(percent: model.brightness, caption: model.sensorCaption)
+        let offsets = model.offsets
+        let names = Dictionary(model.displays.map { ($0.key, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let hasReading = model.ambient.lux != nil
+        for (key, view) in sliders {
+            let result = model.resultPercent(for: key).map { " · \($0)%" } ?? ""
+            let title = key.map { (names[$0] ?? "Display") + result } ?? "Brightness" + result
+            var caption = model.lightCaption
+            if let waiting = model.waitingNote {
+                caption += " — " + waiting
+            }
+            view.show(offset: hasReading ? offsets.offset(for: key ?? "") : nil, title: title, caption: caption)
+        }
         if let line = model.followingLine {
             followingItem?.title = line
         }
@@ -121,6 +152,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleEnabled() {
         model.isEnabled.toggle()
+    }
+
+    @objc private func toggleTogether() {
+        model.adjustTogether.toggle()
     }
 
     @objc private func toggleColor() {

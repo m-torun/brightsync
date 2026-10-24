@@ -1,7 +1,7 @@
 import Foundation
 
-/// Turns the chosen light sensor's readings into a brightness target for the
-/// engine, through the user's curve for that sensor.
+/// Turns the chosen light sensor's readings into a brightness target for each
+/// display: the default curve for the light, moved by the user's offset.
 final class AmbientController {
     /// Every kind of sensor on offer. A new kind is added here.
     static func defaultProviders() -> [LightSensorProvider] {
@@ -14,7 +14,7 @@ final class AmbientController {
 
     private let engine: SyncEngine
     private let log: (String) -> Void
-    private var lastTarget: Int?
+    private var lastLogged: String?
 
     init(engine: SyncEngine, providers: [LightSensorProvider] = AmbientController.defaultProviders(),
          log: @escaping (String) -> Void = Log.write) {
@@ -56,54 +56,89 @@ final class AmbientController {
         return providers.lazy.flatMap(\.sensors).first { $0.id == id }
     }
 
-    var curve: AmbientCurve {
-        Preferences.sourceSensor.flatMap { Preferences.curves[$0] } ?? AmbientCurve()
+    var lux: Double? {
+        selected?.lux
     }
 
-    /// The brightness the curve asks for at the current reading.
-    var target: Double? {
-        selected?.lux.map { curve.percent(at: $0) }
+    /// What the default curve gives at the current light, before any offset.
+    var defaultPercent: Double? {
+        lux.map(AmbientCurve.percent(at:))
     }
 
-    /// Recomputes the target after a reading or a settings change.
-    func update() {
-        if Preferences.sourceSensor != nil, let target, let lux = selected?.lux {
-            let rounded = Int(target.rounded())
-            if rounded != lastTarget {
-                log("ambient: \(HueBridge.format(lux)) lux → \(rounded)%")
-                lastTarget = rounded
-            }
-            engine.setAmbientTarget(target)
-        } else {
-            lastTarget = nil
+    var offsets: BrightnessOffsets {
+        Preferences.offsets
+    }
+
+    /// What a display gets at the current light, offset included.
+    func percent(for display: String) -> Double? {
+        lux.map { offsets.percent(for: display, at: $0) }
+    }
+
+    /// Recomputes the targets after a reading or a settings change.
+    func update(exact: Bool = false) {
+        guard Preferences.sourceSensor != nil, let lux else {
+            lastLogged = nil
             engine.setAmbientTarget(nil)
+            onChange?()
+            return
         }
+        let offsets = self.offsets
+        let target = AmbientTarget(percent: offsets.percent(for: "", at: lux),
+                                   perDisplay: offsets.together ? [:] : offsets.perDisplay.mapValues { min(max(AmbientCurve.percent(at: lux) + $0, 0), 100) },
+                                   exact: exact)
+        let summary = "\(HueBridge.format(lux)) lux → \(Int(AmbientCurve.percent(at: lux).rounded()))%" + describe(offsets)
+        if !exact, summary != lastLogged {
+            log("ambient: \(summary)")
+            lastLogged = summary
+        }
+        engine.setAmbientTarget(target)
         onChange?()
     }
 
-    /// The slider: the curve now passes through `percent` at the current
-    /// light, and the displays follow straight away.
-    func setBrightness(_ percent: Double, finished: Bool) {
-        guard let id = Preferences.sourceSensor, let lux = selected?.lux else { return }
-        var curve = self.curve
-        curve.set(percent, at: lux)
-        var curves = Preferences.curves
-        curves[id] = curve
-        Preferences.curves = curves
-        lastTarget = Int(percent.rounded())
-        engine.setAmbientTarget(percent, exact: true)
+    /// A slider: moves one display, or every display when they are adjusted
+    /// together, by `offset` points from the default curve.
+    func setOffset(_ offset: Double, display: String?, finished: Bool) {
+        var offsets = self.offsets
+        if let display, !offsets.together {
+            offsets.perDisplay[display] = offset
+        } else {
+            offsets.shared = offset
+        }
+        Preferences.offsets = offsets
+        update(exact: true)
         if finished {
-            let points = curve.points.map { "\(Int($0.percent.rounded()))% at \(HueBridge.format($0.lux)) lux" }
-            log("curve: \(points.joined(separator: ", "))")
+            log("offset: \(describe(offsets).isEmpty ? "none" : String(describe(offsets).dropFirst(1)))")
         }
     }
 
-    func resetCurve() {
-        guard let id = Preferences.sourceSensor else { return }
-        var curves = Preferences.curves
-        curves[id] = nil
-        Preferences.curves = curves
-        log("curve: reset to the default")
-        update()
+    func setTogether(_ together: Bool, displays: [String]) {
+        var offsets = self.offsets
+        offsets.setTogether(together, displays: displays)
+        Preferences.offsets = offsets
+        log("offset: monitors adjusted \(together ? "together" : "separately")")
+        update(exact: true)
+    }
+
+    /// Back to the default curve for every monitor.
+    func resetOffsets() {
+        var offsets = self.offsets
+        offsets.shared = 0
+        offsets.perDisplay = [:]
+        Preferences.offsets = offsets
+        log("offset: reset to the default curve")
+        update(exact: true)
+    }
+
+    private func describe(_ offsets: BrightnessOffsets) -> String {
+        if offsets.together {
+            return offsets.shared == 0 ? "" : " \(Self.signed(offsets.shared)) for all"
+        }
+        let parts = offsets.perDisplay.sorted { $0.key < $1.key }.map { "\(Self.signed($0.value))" }
+        return parts.isEmpty ? "" : " " + parts.joined(separator: "/") + " per monitor"
+    }
+
+    static func signed(_ value: Double) -> String {
+        let points = Int(value.rounded())
+        return points > 0 ? "+\(points)" : points == 0 ? "±0" : "\(points)"
     }
 }

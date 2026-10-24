@@ -100,16 +100,17 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
         func refresh() {}
         func addSensors() {}
     }
-    var curve = AmbientCurve()
-    curve.set(80, at: 120)
-    curve.set(35, at: 3)
-    // `--display` shows brightness following a display instead of the sensor.
+    // `--display` shows brightness following a display instead of the sensor,
+    // `--separate` a slider per monitor.
     let following = CommandLine.arguments.contains("--display")
+    let separate = CommandLine.arguments.contains("--separate")
     var demo: [String: Any] = [
         "sourceDisplayKey": "uuid-dell",
         "colorSourceKey": "uuid-dell",
         "syncColorTemperature": true,
-        "ambientCurves": try! JSONEncoder().encode(["demo:desk": curve]),
+        "adjustMonitorsTogether": !separate,
+        "brightnessOffset": 10.0,
+        "displayBrightnessOffsets": ["uuid-dell": 10.0, "uuid-lenovo": -5.0],
     ]
     if !following {
         demo["sourceSensorID"] = "demo:desk"
@@ -122,18 +123,56 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
         DisplayReading(key: "uuid-dell", name: "DELL U3225QE", percent: 80, colorPreset: 5, isSource: following),
         DisplayReading(key: "uuid-lenovo", name: "LEN T27p-10", percent: 80, colorPreset: 5, isSource: false),
     ]))
+    let suffix = (following ? "-display" : "") + (separate ? "-separate" : "")
+    // Light mode on the window's own background, whatever the Mac is set to.
+    func save(_ view: NSView, as name: String) {
+        guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: image)
+        let canvas = NSImage(size: view.bounds.size)
+        canvas.lockFocus()
+        NSColor.windowBackgroundColor.setFill()
+        view.bounds.fill()
+        image.draw(in: view.bounds)
+        canvas.unlockFocus()
+        let url = URL(fileURLWithPath: folder).appendingPathComponent("\(name)\(suffix).png")
+        guard let tiff = canvas.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: url)
+        print("\(url.path)  \(Int(view.bounds.width))×\(Int(view.bounds.height))")
+    }
+    NSApp.appearance = NSAppearance(named: .aqua)
+
     let window = AppController.settingsWindow(for: model)
     window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
     window.orderFrontRegardless()
     for tab in SettingsView.Tab.allCases {
         model.settingsTab = tab
         RunLoop.main.run(until: Date().addingTimeInterval(0.6))
-        guard let view = window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-        view.cacheDisplay(in: view.bounds, to: image)
-        let url = URL(fileURLWithPath: folder).appendingPathComponent("settings-\(tab)\(following ? "-display" : "").png")
-        try? image.representation(using: .png, properties: [:])?.write(to: url)
-        print("\(url.path)  \(Int(view.bounds.width))×\(Int(view.bounds.height))")
+        if let view = window.contentView {
+            save(view, as: "settings-\(tab)")
+        }
     }
+
+    // The menu's sliders, as the menu would stack them.
+    let keys: [String?] = separate ? ["uuid-dell", "uuid-lenovo"] : [nil]
+    let sliders = keys.enumerated().map { index, key -> NSView in
+        let view = SliderMenuView(title: "Brightness", offsetRange: BrightnessOffsets.range, captioned: index == keys.count - 1)
+        let name = key == "uuid-dell" ? "DELL U3225QE" : key == "uuid-lenovo" ? "LEN T27p-10" : "Brightness"
+        view.show(offset: model.offsets.offset(for: key ?? ""), title: name + " · \(model.resultPercent(for: key) ?? 0)%",
+                  caption: model.lightCaption + " — applies in 42 s")
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        view.heightAnchor.constraint(equalToConstant: view.frame.height).isActive = true
+        return view
+    }
+    let stack = NSStackView(views: sliders)
+    stack.orientation = .vertical
+    stack.spacing = 0
+    let menuWindow = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 300, height: 200), styleMask: .borderless, backing: .buffered, defer: false)
+    menuWindow.contentView = stack
+    menuWindow.setContentSize(stack.fittingSize)
+    menuWindow.orderFrontRegardless()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    save(stack, as: "menu-sliders")
     exit(0)
 }
 

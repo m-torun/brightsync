@@ -446,4 +446,13 @@ final class SyncEngineTests {
         engine.tick()
         #expect(bus.transactions.contains("write Dell \(brightness)=12"))
     }
+
+    // MARK: - Per-monitor targets
+
+    @Test func eachMonitorCanHaveItsOwnTarget() {
+        settings.followsSensor = true
+        engine.receiveAmbient(AmbientTarget(percent: 60, perDisplay: ["uuid-Lenovo": 45]))
+        settleAndSync()
+        #expect(bus.transactions.filter { $0.hasPrefix("write") } == ["write Dell \(brightness)=60", "write Lenovo \(brightness)=45"])
+    }
 }

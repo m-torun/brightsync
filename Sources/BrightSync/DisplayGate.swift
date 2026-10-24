@@ -85,8 +85,13 @@ final class DisplayGate {
             case .poweringOff: state.poweringOff = true
             case .reconfigurationBegan, .reconfigured: break
             }
-            state.lastEvent = time
-            state.generation += 1
+            // Locking holds the gate, but neither it nor unlocking changes
+            // anything about the displays, so they do not restart the quiet
+            // period or make the engine look at the displays afresh.
+            if event != .screenLocked, event != .screenUnlocked {
+                state.lastEvent = time
+                state.generation += 1
+            }
         }
     }
 

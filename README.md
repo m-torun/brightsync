@@ -8,8 +8,9 @@ light sensor doing its thing, or the keyboard brightness keys only reaching one
 screen — and you want the rest of the desk to match.
 
 - One source display, any number of followers
-- Or follow an ambient light sensor (Philips Hue motion sensors to start with)
-  through a brightness curve you shape from the menu (see
+- Or follow an ambient light sensor (a Philips Hue motion sensor, or any Zigbee
+  sensor that reports light through Zigbee2MQTT) through a brightness curve
+  you shape from the menu (see
   [Following an ambient light sensor](#following-an-ambient-light-sensor))
 - Optionally mirrors the color preset (color temperature) as well
 - The source can be any connected display, not just the main one
@@ -18,8 +19,8 @@ screen — and you want the rest of the desk to match.
   [Staying out of the way](#staying-out-of-the-way))
 - Proportional, not literal: a panel whose range is 0–80 is set to the same
   *percentage*, not the same raw number
-- No Dock icon, one small binary, and no permissions unless you pair a Hue
-  bridge, which needs local network access
+- No Dock icon, one small binary, and no permissions unless you add a light
+  sensor, which needs local network access
 
 ## Requirements
 
@@ -109,19 +110,30 @@ reboots and reconnection, where display IDs do not.
 Brightness can follow an ambient light sensor instead of a display. That
 helps when a monitor's own sensor will not go as bright or as dim as you want,
 or when no monitor has one. BrightSync ships with support for the light sensor
-in Philips Hue motion sensors.
+in Philips Hue motion sensors, and for any Zigbee device that reports light
+through [Zigbee2MQTT](https://www.zigbee2mqtt.io/).
 
-1. In Settings → **Sensors**, choose **Add Sensor ▸ Philips Hue…**, press the
-   round link button on top of the bridge, and click **Pair** within 30 seconds.
+1. In Settings → **Sensors**, choose **Add Sensor**, then:
+   - **Philips Hue…**: press the round link button on top of the bridge, and
+     click **Pair** within 30 seconds. The key the bridge hands out is kept in
+     your login Keychain.
+   - **Zigbee2MQTT…**: enter the address of its web interface, such as
+     `192.168.1.10:8080`. Every device that reports illuminance shows up as a
+     sensor, named as in Zigbee2MQTT (or by its model until you rename it
+     there). The frontend must be on, without an auth token, which BrightSync
+     does not support yet.
+
    macOS asks whether BrightSync may find devices on your local network; it
-   needs that to reach the bridge. The key the bridge hands out is kept in your
-   login Keychain.
+   needs that to reach the bridge or server.
 2. Choose the sensor under **Brightness → Follow**. Put it where it sees the
-   room's light but not the screens, or it will measure the monitors.
+   room's light but not the screens, or it will measure the monitors. A sensor
+   with a light of its own, such as a status LED, measures that too, so keep it off.
 3. Turn off the monitors' own auto-brightness, or they will fight it.
 
-The bridge pushes a new reading as soon as the light changes (every few seconds
-while it is changing), so nothing is polled. Every display follows the sensor,
+The Hue bridge and Zigbee2MQTT push a new reading as soon as the light changes,
+so nothing is polled. Zigbee2MQTT also sends each sensor's last reading the
+moment BrightSync connects, and marks a sensor offline when it stops reporting
+if availability is on there. Every display follows the sensor,
 including a single one. While BrightSync is holding off (after a wake or a
 display change, during a call), the slider's caption says so and counts down;
 whatever you set is applied when it may send again.
@@ -158,8 +170,8 @@ ends up with, and **Reset to Default** puts everything back to 0.
 /Applications/BrightSync.app/Contents/MacOS/BrightSync --sensors 60
 ```
 
-lists the light sensors on paired bridges with their readings, then prints each
-new reading for 60 seconds.
+lists the light sensors on paired bridges and added Zigbee2MQTT servers with
+their readings, then prints each new reading for 60 seconds.
 
 ### Adding another kind of sensor
 
@@ -169,7 +181,17 @@ A kind of sensor is a class that implements `LightSensorProvider`
 and the latest reading in lux, calls `onChange` when anything changes, and
 never prompts on its own. The Hue provider (`Sources/BrightSync/Hue/`) is the
 reference: Bonjour discovery, pairing, the key in the Keychain, certificate
-pinning, and an event stream that reconnects with back-off.
+pinning, and an event stream that reconnects with back-off. The Zigbee2MQTT
+provider (`Sources/BrightSync/Zigbee2MQTT/`) is a smaller one: an address,
+and a WebSocket that reconnects with back-off and is pinged to catch a dead
+connection.
+
+The tests include one against a real Zigbee2MQTT server, which runs when its
+address is given:
+
+```sh
+BRIGHTSYNC_TEST_ZIGBEE2MQTT=192.168.1.10:8080 ./test.sh
+```
 
 ## Color temperature
 
@@ -275,12 +297,14 @@ hot corner, a keyboard shortcut), so a transaction already under way, about
 
 Settings are stored in your own `UserDefaults` under
 `app.brightsync.BrightSync` (source display or sensor, interval, enabled,
-deadband, color temperature syncing, your brightness curves, and the last
-address of each Hue bridge). Hue keys are in your login Keychain under
+deadband, color temperature syncing, your brightness curves, the last
+address of each Hue bridge, and the Zigbee2MQTT servers you added, under
+`zigbee2mqttServers`). Hue keys are in your login Keychain under
 "BrightSync Hue".
 Nothing is written into this repository. The app makes no network requests
-unless you pair a Hue bridge, and then only to that bridge on your local
-network, after checking its certificate against Philips' own CA.
+unless you add a sensor, and then only to that Hue bridge (after checking its
+certificate against Philips' own CA) or Zigbee2MQTT server on your local
+network.
 
 ## Notes and limits
 

@@ -16,6 +16,7 @@ enum Preferences {
         static let sharedOffset = "brightnessOffset"
         static let displayOffsets = "displayBrightnessOffsets"
         static let hueHosts = "hueBridgeHosts"
+        static let zigbee2mqttServers = "zigbee2mqttServers"
         static let pauseDuringCalls = "pauseDuringCalls"
         static let displayRanges = "displayBrightnessRanges"
         static let knownDisplays = "knownDisplays"
@@ -65,6 +66,12 @@ enum Preferences {
         var hosts = defaults.dictionary(forKey: Key.hueHosts) as? [String: String] ?? [:]
         hosts[bridgeID.lowercased()] = host
         defaults.set(hosts, forKey: Key.hueHosts)
+    }
+
+    /// Addresses of the Zigbee2MQTT web interfaces added under Sensors, as typed.
+    static var zigbee2mqttServers: [String] {
+        get { defaults.stringArray(forKey: Key.zigbee2mqttServers) ?? [] }
+        set { defaults.set(newValue, forKey: Key.zigbee2mqttServers) }
     }
 
     static var interval: Int {

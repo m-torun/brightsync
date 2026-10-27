@@ -14,8 +14,8 @@ struct LightSensor: Equatable {
     var unavailable: String?
 }
 
-/// A kind of light sensor. BrightSync ships with Philips Hue; another kind
-/// (MQTT, Zigbee, ESPHome, a script...) plugs in by implementing this and
+/// A kind of light sensor. BrightSync ships with Philips Hue and Zigbee2MQTT;
+/// another kind (MQTT, ESPHome, a script...) plugs in by implementing this and
 /// being listed in `AmbientController.defaultProviders`. Settings lists every
 /// provider's sensors together, and offers each provider under Add Sensor.
 ///
@@ -35,6 +35,9 @@ protocol LightSensorProvider: AnyObject {
     var problem: String? { get }
     /// Called on the main queue whenever the sensors, readings or problem change.
     var onChange: (() -> Void)? { get set }
+    /// Whether the user has set any up, e.g. paired a bridge. Known once
+    /// `start` has run.
+    var isSetUp: Bool { get }
     /// Resumes connections set up earlier. Must not prompt.
     func start()
     /// Reconnects now, e.g. after the Mac wakes or the network changes.

@@ -20,6 +20,10 @@ final class HueProvider: LightSensorProvider {
         !bridges.isEmpty
     }
 
+    var isSetUp: Bool {
+        isPaired
+    }
+
     var activity: String? {
         isPairing ? "Waiting for the link button on your Hue bridge…" : nil
     }

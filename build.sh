@@ -30,7 +30,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSLocalNetworkUsageDescription</key><string>BrightSync reads ambient light from Philips Hue sensors through your Hue bridge.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>BrightSync reads ambient light from sensors on your local network: Philips Hue sensors through your Hue bridge, and Zigbee sensors through Zigbee2MQTT.</string>
     <key>NSBonjourServices</key><array><string>_hue._tcp</string></array>
     <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>

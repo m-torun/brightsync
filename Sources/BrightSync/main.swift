@@ -48,40 +48,49 @@ if let flag = CommandLine.arguments.firstIndex(of: "--read") {
     exit(0)
 }
 
-// `--sensors [seconds]` lists the light sensors on paired Hue bridges with
-// their current reading, then keeps printing readings as they arrive for that
-// many seconds. The same code path as the app, so it also checks pairing,
-// the Keychain and the bridge's certificate.
+// `--sensors [seconds]` lists the light sensors BrightSync is set up with
+// (paired Hue bridges, added Zigbee2MQTT servers) with their current reading,
+// then keeps printing readings as they arrive for that many seconds. The same
+// code path as the app, so it also checks pairing, the Keychain, the Hue
+// bridge's certificate and each connection.
 if let flag = CommandLine.arguments.firstIndex(of: "--sensors") {
     let watch = CommandLine.arguments.dropFirst(flag + 1).first.flatMap(TimeInterval.init) ?? 0
-    let hue = HueProvider()
-    hue.start()
-    guard hue.isPaired else {
-        print("No Hue bridge is paired. Pair one from the menu: Brightness source → Pair Hue Bridge…")
+    let providers = AmbientController.defaultProviders().filter { provider in
+        provider.start()
+        return provider.isSetUp
+    }
+    guard !providers.isEmpty else {
+        print("No light sensors are set up. Add one in Settings → Sensors → Add Sensor.")
         exit(1)
     }
     var shown: [String: String] = [:]
-    var lastProblem: String?
-    hue.onChange = {
-        let time = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime])
-        for sensor in hue.sensors {
-            let reading = sensor.unavailable ?? "\(HueBridge.format(sensor.lux)) lux"
-            guard shown[sensor.id] != reading else { continue }
-            shown[sensor.id] = reading
-            print("\(time)  \(sensor.name): \(reading)  [\(sensor.id)]")
-        }
-        if hue.problem != lastProblem, let problem = hue.problem {
-            print("\(time)  \(problem)")
-        }
-        lastProblem = hue.problem
-        if watch == 0, !hue.sensors.isEmpty {
-            Log.flush()
-            exit(0)
+    var lastProblem: [String: String] = [:]
+    for provider in providers {
+        provider.onChange = {
+            let time = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime])
+            for sensor in provider.sensors {
+                let reading = sensor.unavailable ?? "\(HueBridge.format(sensor.lux)) lux"
+                guard shown[sensor.id] != reading else { continue }
+                shown[sensor.id] = reading
+                print("\(time)  \(sensor.name) (\(provider.name)): \(reading)  [\(sensor.id)]")
+            }
+            if provider.problem != lastProblem[provider.name], let problem = provider.problem {
+                print("\(time)  \(provider.name): \(problem)")
+            }
+            lastProblem[provider.name] = provider.problem
+            // Without a watch time, stop once every kind has a reading for each of its sensors.
+            let complete = providers.allSatisfy { provider in
+                !provider.sensors.isEmpty && provider.sensors.allSatisfy { $0.lux != nil || $0.unavailable != nil }
+            }
+            if watch == 0, complete {
+                Log.flush()
+                exit(0)
+            }
         }
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + max(watch, 15)) {
         Log.flush()
-        exit(hue.sensors.isEmpty ? 1 : 0)
+        exit(providers.contains { !$0.sensors.isEmpty } ? 0 : 1)
     }
     dispatchMain()
 }
@@ -97,6 +106,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
         let sensors = [LightSensor(id: "demo:desk", name: "Desk sensor", lux: 120, updated: Date())]
         let problem: String? = nil
         let activity: String? = nil
+        let isSetUp = true
         var onChange: (() -> Void)?
         func start() {}
         func refresh() {}

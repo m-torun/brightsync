@@ -5,7 +5,7 @@ import Foundation
 final class AmbientController {
     /// Every kind of sensor on offer. A new kind is added here.
     static func defaultProviders() -> [LightSensorProvider] {
-        [HueProvider()]
+        [HueProvider(), Zigbee2MQTTProvider()]
     }
 
     let providers: [LightSensorProvider]

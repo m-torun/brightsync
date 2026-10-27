@@ -68,7 +68,8 @@ if let flag = CommandLine.arguments.firstIndex(of: "--sensors") {
     for provider in providers {
         provider.onChange = {
             let time = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime])
-            for sensor in provider.sensors {
+            // A sensor is listed a moment before its first reading arrives.
+            for sensor in provider.sensors where sensor.lux != nil || sensor.unavailable != nil {
                 let reading = sensor.unavailable ?? "\(HueBridge.format(sensor.lux)) lux"
                 guard shown[sensor.id] != reading else { continue }
                 shown[sensor.id] = reading

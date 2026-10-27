@@ -27,9 +27,11 @@ screen — and you want the rest of the desk to match.
 - Apple Silicon Mac, macOS 13 or later
 - Displays reachable over DDC/CI. DisplayPort, USB-C and Thunderbolt are the
   reliable paths. Over a Mac's built-in HDMI port, DDC *reads* fail on some
-  Mac and monitor combinations even though writes succeed — if a display shows
-  as `unreadable`, try connecting it over USB-C/Thunderbolt instead. BrightSync
-  backs off from a display it cannot read, so an unreadable display costs a
+  Mac and monitor combinations even though writes succeed. Such a display can
+  still follow a light sensor or another display: after two unusable replies
+  BrightSync writes to it without reading, in the range it read before or
+  else 0–100. It cannot be the display others follow. BrightSync backs off
+  from reading a display it cannot read, so an unreadable display costs a
   read every half hour at most, not one per round.
 
 ## Install

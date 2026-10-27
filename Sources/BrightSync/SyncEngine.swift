@@ -93,6 +93,8 @@ final class SyncEngine {
     static let maxBackoff: TimeInterval = 30 * 60
     /// How often a pause (a call, the idle timer running out) is checked again.
     static let pauseRecheck: TimeInterval = 15
+    /// The brightness range assumed for a display that cannot be read.
+    static let assumedMaximum = 100
 
     let gate: DisplayGate
     private let bus: DisplayBus
@@ -334,11 +336,30 @@ final class SyncEngine {
             write(display, DDCKIT_VCP_BRIGHTNESS, Int((fraction * Double(max)).rounded()))
             return
         }
-        guard let current = read(display, DDCKIT_VCP_BRIGHTNESS, fresh: false) else { return }
-        let wanted = Int((fraction * Double(current.max)).rounded())
-        if abs(current.current - wanted) > deadband {
-            write(display, DDCKIT_VCP_BRIGHTNESS, wanted)
+        if let current = read(display, DDCKIT_VCP_BRIGHTNESS, fresh: false) {
+            let wanted = Int((fraction * Double(current.max)).rounded())
+            if abs(current.current - wanted) > deadband {
+                write(display, DDCKIT_VCP_BRIGHTNESS, wanted)
+            }
+        } else if let max = unreadableRange(display) {
+            write(display, DDCKIT_VCP_BRIGHTNESS, Int((fraction * Double(max)).rounded()))
         }
+    }
+
+    /// Some links never carry a reply: a Dell U3225QE on the Mac's HDMI port
+    /// answers every read with noise, yet takes every write. Once a display's
+    /// brightness has come back unusable twice in a row, it is written to
+    /// without a read, in the range read before or else the usual 0–100.
+    private func unreadableRange(_ display: Display) -> Int? {
+        let key = cacheKey(display, DDCKIT_VCP_BRIGHTNESS)
+        guard let failures = readBackoff[key]?.failures, failures >= 2 else { return nil }
+        if let max = ranges[key] {
+            return max
+        }
+        ranges[key] = Self.assumedMaximum
+        saveRanges(ranges)
+        log("\(display.name) does not answer brightness reads; writing to it as 0–\(Self.assumedMaximum)")
+        return Self.assumedMaximum
     }
 
     /// Re-resolves the displays after the gate has been through an event.

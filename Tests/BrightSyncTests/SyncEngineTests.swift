@@ -447,6 +447,60 @@ final class SyncEngineTests {
         #expect(bus.transactions.contains("write Dell \(brightness)=12"))
     }
 
+    // MARK: - Displays that cannot be read
+
+    @Test func aDisplayThatNeverAnswersIsWrittenAsZeroToAHundred() {
+        settings.followsSensor = true
+        bus["Dell"].garbled = [brightness]
+        engine.receiveAmbient(60, exact: false)
+        settleAndSync()
+        #expect(!bus.transactions.contains { $0.hasPrefix("write Dell") }, "one unusable reply may be a glitch")
+        bus.reset()
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions == ["read Dell \(brightness)", "write Dell \(brightness)=60"])
+        #expect(logged.contains("Dell does not answer brightness reads; writing to it as 0–100"))
+        bus.reset()
+        engine.receiveAmbient(25, exact: false)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=25", "write Lenovo \(brightness)=25"], "not read again")
+        bus.reset()
+        gate.record(.screensSlept)
+        gate.record(.screensWoke)
+        engine.receiveAmbient(12, exact: false)
+        clock.advance(60)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=12", "write Lenovo \(brightness)=12"])
+    }
+
+    @Test func aFollowerThatNeverAnswersStillMirrorsTheSource() {
+        bus["Lenovo"].garbled = [brightness]
+        settleAndSync()
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions.filter { $0.hasPrefix("write") } == ["write Lenovo \(brightness)=50"])
+        bus.reset()
+        bus["Dell"].brightness.current = 80
+        clock.advance(30)
+        engine.tick()
+        #expect(bus.transactions == ["read Dell \(brightness)", "write Lenovo \(brightness)=80"])
+    }
+
+    @Test func aFollowerThatStopsAnsweringKeepsTheRangeItWasReadWith() {
+        bus["Lenovo"].brightness = (40, 80)
+        settleAndSync()
+        gate.record(.reconfigured)
+        bus["Lenovo"].garbled = [brightness]
+        bus["Dell"].brightness.current = 25
+        clock.advance(60)
+        engine.tick()
+        clock.advance(30)
+        bus.reset()
+        engine.tick()
+        #expect(bus.transactions == ["read Dell \(brightness)", "read Lenovo \(brightness)", "write Lenovo \(brightness)=20"])
+        #expect(!logged.contains { $0.contains("does not answer") }, "its own range, not an assumed one")
+    }
+
     // MARK: - Per-monitor targets
 
     @Test func eachMonitorCanHaveItsOwnTarget() {

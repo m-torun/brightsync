@@ -135,6 +135,28 @@ private final class FakeSensors: LightSensorProvider {
         #expect(writes().filter { $0.hasPrefix("write Dell") }.count == 10, "and then it stops")
     }
 
+    /// Sensors only report changes, so the hold has to end with no new reading.
+    @Test func aLastingChangeIsFollowedWithNothingNewArriving() {
+        Preferences.sourceSensor = "desk"
+        Preferences.smoothLight = true
+        let clock = FakeClock()
+        let sensors = FakeSensors([("desk", 1)])
+        var logged: [String] = []
+        let ambient = AmbientController(engine: engine, providers: [sensors], now: { clock.time }, log: { logged.append($0) })
+        ambient.update()
+        sensors.sensors[0].lux = 100
+        clock.advance(1)
+        ambient.update()
+        #expect(ambient.lux! < 2, "one reading moves nothing")
+        clock.advance(59)
+        ambient.update()
+        #expect(ambient.lux! < 4)
+        clock.advance(1)
+        ambient.update()
+        #expect(ambient.lux! > 95, "and at a minute, it applies")
+        #expect(logged.contains { $0.contains("and stayed; following at once") })
+    }
+
     @Test func rampingIsOnByDefaultAtOnePercentEveryTenSeconds() {
         UserDefaults.standard.removeObject(forKey: "rampBrightness")
         UserDefaults.standard.removeObject(forKey: "rampSeconds")

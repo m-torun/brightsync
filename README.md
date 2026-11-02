@@ -180,9 +180,12 @@ on a log scale, so a wobble between 1.3 and 3.3 lux would move the monitors
 by several points every few minutes. With **Smooth small changes** (Settings →
 Brightness, on by default), brightness follows the light averaged over the
 last 5 minutes, weighted by how long each reading held, so small changes ramp
-in gently and wobbles cancel out. A reading more than four times brighter or
-darker than the average, such as a lamp switched on at night, replaces the
-average and applies at once.
+in gently and wobbles cancel out. A reading about six times brighter or darker
+than the average, or more, that stays there for a minute, such as a lamp
+switched on at night, replaces the average and applies at once. Until then it
+is averaged like any other, so a sensor that pulses for a few seconds at a time
+does not move the monitors. That matters most in a dim room, where a change of
+a few lux is already fourfold or more.
 
 ### Ramping
 
@@ -192,10 +195,9 @@ default), the monitors move 1% at a time, every 10 seconds unless you choose
 another **Ramp speed**, from every 3 to every 30 seconds. A display with a
 range other than 0–100 moves by 1% of its range, so monitors stay in step.
 
-A gap of 15 points or more applies at once: on the default curve that is the
-same fourfold change in light that smoothing treats as a lamp being switched
-on, and it also covers coming back to a room whose light changed while the
-screens slept. Moving a slider applies at once too. Ramping only applies to
+A gap of 15 points or more applies at once. With smoothing on, that takes a big
+change in light that has lasted a minute, such as a lamp switched on, or coming
+back to a room whose light changed while the screens slept. Moving a slider applies at once too. Ramping only applies to
 following a sensor; a display that follows another display matches it
 directly, since keeping the two equal is the point.
 

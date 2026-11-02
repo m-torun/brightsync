@@ -134,12 +134,16 @@ final class AmbientController {
             smoothedSensor = sensor.id
             lastReading = nil
         }
+        let before = smoother.lux(at: now())
+        let jumped: Bool
         if lastReading?.lux != current || lastReading?.updated != sensor.updated {
-            let before = smoother.lux(at: now())
-            if smoother.add(lux: current, at: now()), Preferences.smoothLight, let before {
-                log("ambient: light jumped from \(HueBridge.format(before)) to \(HueBridge.format(current)) lux; following at once")
-            }
+            jumped = smoother.add(lux: current, at: now())
             lastReading = (current, sensor.updated)
+        } else {
+            jumped = smoother.confirmJump(at: now())
+        }
+        if jumped, Preferences.smoothLight, let before {
+            log("ambient: light went from \(HueBridge.format(before)) to \(HueBridge.format(current)) lux and stayed; following at once")
         }
         let settled = !Preferences.smoothLight || smoother.isSettled(at: now())
         if settled {

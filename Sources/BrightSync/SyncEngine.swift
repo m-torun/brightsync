@@ -103,8 +103,8 @@ final class SyncEngine {
     /// The brightness range assumed for a display that cannot be read.
     static let assumedMaximum = 100
     /// A gap this large (as a fraction of the range) is not ramped. On the
-    /// default curve 15 points is a fourfold change in light, the same line
-    /// `LightSmoother` draws for a lamp being switched on.
+    /// default curve 15 points is a fourfold change in light. With smoothing
+    /// on, the target only moves this far at once for a change that has lasted.
     static let rampSnap = 0.15
 
     let gate: DisplayGate

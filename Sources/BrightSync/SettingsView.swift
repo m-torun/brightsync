@@ -91,7 +91,7 @@ private struct BrightnessPane: View {
                 }
                 Toggle("Smooth small changes", isOn: $model.smoothLight)
                 LabeledContent("") {
-                    Note("Follows the light averaged over the last 5 minutes, so small changes do not keep nudging the monitors. A change of more than fourfold, such as a lamp switched on, applies at once.")
+                    Note("Follows the light averaged over the last 5 minutes, so small changes do not keep nudging the monitors. A change of about sixfold or more that lasts a minute, such as a lamp switched on, applies at once.")
                         .padding(.bottom, 4)
                 }
                 Toggle("Ramp brightness gradually", isOn: $model.rampBrightness)

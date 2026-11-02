@@ -107,14 +107,19 @@ own sensor), the offsets, smoothing, ramping, the check interval, and the
 **Sync brightness** and **Sync color** switches. The sensors you have added,
 **Start at login** and **Pause during calls** apply everywhere.
 
-A combination seen for the first time starts from the current settings. If it
-shares a monitor with the one you left, it is taken to be the same room with a
-monitor switched away, and keeps the sensor. If it shares none, it is a new
-room: brightness follows the main display until you choose a sensor there,
-since the last room's sensor would be measuring the wrong light. When no
-monitors are found at all, the current profile stays. Monitors are told apart
-by EDID UUID, so a different monitor of the same model is a different
-combination.
+Combinations are told apart by EDID UUID. Many monitors report a different
+EDID on each input, so the same monitor on another cable counts as another
+combination, and it starts with the settings of the one with the same monitor
+names. Two units of one model in different rooms start the same way, but they
+keep separate settings once you change them.
+
+Any other combination seen for the first time starts from the current
+settings. If it has a monitor name in common with the one you left, it is taken
+to be the same room with a monitor switched away, and keeps the sensor. If not,
+it is a new room: brightness follows the main display until you choose a sensor
+there, since the last room's sensor would be measuring the wrong light. When no
+monitors are found at all, which includes a monitor showing another input
+when it is the only one, the current profile stays.
 
 ## Checking what it sees
 
@@ -194,11 +199,20 @@ screens slept. Moving a slider applies at once too. Ramping only applies to
 following a sensor; a display that follows another display matches it
 directly, since keeping the two equal is the point.
 
-Each step is a DDC write. A 14-point change is 14 writes per monitor rather
-than one, a cost monitors can bear at this pace, but one to weigh if you choose
-a fast ramp: see [How it works](#how-it-works) on write cycles. The rules in
+Each step is a DDC write, so ramping costs writes: see
+[How it works](#how-it-works) on write cycles. How many depends on how far
+brightness travels, not on the speed. Nine days of one desk's log, replayed
+through the engine, came to about 10 writes per hour of use per monitor with
+ramping at any speed, against 5 without. The rules in
 [Staying out of the way](#staying-out-of-the-way) cover every step, and a ramp
 held up by a call or a sleep carries on afterwards.
+
+After a wake or a display change, BrightSync does not read a display to see
+where it is. It carries on from the last value it sent, so the first write also
+corrects a monitor that was changed meanwhile, for instance by another computer
+on its other input. If it has no step to take, it sends the target once. The
+first write after BrightSync launches goes straight to the target, since it has
+no last value yet.
 
 ### Brighter or dimmer than the default
 

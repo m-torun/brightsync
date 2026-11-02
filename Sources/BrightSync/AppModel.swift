@@ -14,20 +14,23 @@ final class AppModel: ObservableObject {
     let engine: SyncEngine
     let ambient: AmbientController
     private var events: DisplayEvents?
+    private let log: (String) -> Void
 
     @Published private(set) var status = SyncStatus()
     @Published var settingsTab = SettingsView.Tab.brightness
 
     init(engine: SyncEngine = SyncEngine(gate: DisplayGate(conditions: HoldConditions.all())),
-         providers: [LightSensorProvider] = AmbientController.defaultProviders()) {
+         providers: [LightSensorProvider] = AmbientController.defaultProviders(),
+         log: @escaping (String) -> Void = Log.write) {
         self.engine = engine
-        ambient = AmbientController(engine: engine, providers: providers)
-    }
-
-    func start() {
+        self.log = log
+        ambient = AmbientController(engine: engine, providers: providers, log: log)
         engine.onDisplaysSettled = { [weak self] displays in
             DispatchQueue.main.async { self?.arrive(at: displays) }
         }
+    }
+
+    func start() {
         engine.onStatus = { [weak self] status in
             self?.status = status
             let seen = status.readings.map { (key: $0.key, name: $0.name) }
@@ -68,7 +71,7 @@ final class AppModel: ObservableObject {
             ambient.update()
         }
         if book.activeKey != before, let name = book.activeName {
-            Log.write("profile: \(name)" + (arrival?.isNew == false ? " (remembered)" : " (new)"))
+            log("profile: \(name)" + (arrival?.isNew == false ? " (remembered)" : " (new)"))
         }
         objectWillChange.send()
         engine.resume()

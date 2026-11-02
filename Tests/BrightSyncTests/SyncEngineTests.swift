@@ -676,6 +676,44 @@ final class SyncEngineTests {
         #expect(engine.nextDelay() == settings.interval)
     }
 
+    @Test func aLastStepThatFailsIsTriedAgain() {
+        startRamp()
+        engine.receiveAmbient(52, exact: false)
+        engine.tick()
+        bus["Dell"].failing = true
+        clock.advance(10)
+        engine.tick()
+        bus["Dell"].failing = false
+        letBackOffRunOut()
+        #expect(bus["Dell"].brightness.current == 52)
+    }
+
+    /// Lets the back-off after a failure run out, and a round happen.
+    private func letBackOffRunOut() {
+        clock.advance(SyncEngine.maxBackoff)
+        engine.tick()
+    }
+
+    @Test func turningSyncOffMidRampStopsItsTimer() {
+        startRamp()
+        engine.receiveAmbient(60, exact: false)
+        engine.tick()
+        settings.isEnabled = false
+        clock.advance(100)
+        engine.tick()
+        #expect(engine.nextDelay() == settings.interval, "not waking up for a ramp that is not running")
+    }
+
+    @Test func followingADisplayMidRampStopsItsTimer() {
+        startRamp()
+        engine.receiveAmbient(60, exact: false)
+        engine.tick()
+        settings.followsSensor = false
+        clock.advance(100)
+        engine.tick()
+        #expect(engine.nextDelay() == settings.interval)
+    }
+
     @Test func aFollowerOfADisplayDoesNotRamp() {
         settings.rampInterval = 10
         settleAndSync()
@@ -683,6 +721,59 @@ final class SyncEngineTests {
         bus["Dell"].brightness.current = 58
         engine.tick()
         #expect(writes == ["write Lenovo \(brightness)=58"])
+    }
+
+    // MARK: - Ramping does not trust its memory of a display
+
+    @Test func afterAWakeADisplayChangedElsewhereIsPutRight() {
+        startRamp()
+        gate.record(.screensSlept)
+        bus["Dell"].brightness.current = 80 // the other Mac, on the monitor's other input
+        gate.record(.screensWoke)
+        clock.advance(60)
+        engine.tick()
+        #expect(bus["Dell"].brightness.current == 50, "the target did not move, but the panel did")
+    }
+
+    @Test func aPresetThatCarriesItsOwnBrightnessIsPutRight() {
+        settings.syncColor = true
+        settings.colorSourceKey = "uuid-Dell"
+        startRamp()
+        clock.advance(30)
+        bus["Dell"].preset = (8, 12)
+        engine.tick() // copies the preset, and this panel's brightness goes with it
+        bus["Lenovo"].brightness.current = 90
+        clock.advance(30)
+        engine.tick()
+        #expect(bus["Lenovo"].brightness.current == 50)
+    }
+
+    @Test func aRampAfterAWakeStartsFromTheLastValueWritten() {
+        startRamp()
+        engine.receiveAmbient(52, exact: false)
+        engine.tick()
+        clock.advance(10)
+        engine.tick()
+        bus.reset()
+        gate.record(.screensSlept)
+        gate.record(.screensWoke)
+        engine.receiveAmbient(56, exact: false)
+        clock.advance(60)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=53", "write Lenovo \(brightness)=53"])
+    }
+
+    @Test func aSliderChangeCutShortByAnEventStillAppliesAtOnce() {
+        startRamp()
+        bus.afterTransaction = { [unowned self] in gate.record(.reconfigured) }
+        engine.receiveAmbient(58, exact: true)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=58"])
+        bus.afterTransaction = nil
+        bus.reset()
+        clock.advance(60)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=58", "write Lenovo \(brightness)=58"])
     }
 
     // MARK: - Waiting for a profile

@@ -401,8 +401,14 @@ final class SyncEngine {
     private func follow(_ display: Display, fraction: Double, deadband: Int, writeBlind: Bool = false, ramp: Bool = false) {
         let key = cacheKey(display, DDCKIT_VCP_BRIGHTNESS)
         if ramp, known[key] == nil, let max = ranges[key], let last = lastBrightness[key] {
-            // Back from an event: ramp on from where it was left, unread.
-            known[key] = (last, max)
+            // Back from an event, and the panel may have changed meanwhile:
+            // another computer on its other input, or a colour preset. A ramp
+            // only carries on from memory if there is a step to take, since
+            // that step's write also puts the panel right. Otherwise the one
+            // write below does.
+            if abs(Int((fraction * Double(max)).rounded()) - last) > deadband {
+                known[key] = (last, max)
+            }
         }
         if writeBlind, known[key] == nil, let max = ranges[key] {
             // A sensor sets the target, so after an event the display most
@@ -445,9 +451,6 @@ final class SyncEngine {
         let step = min(max(1, Int((Double(current.max) / 100).rounded())), abs(gap))
         let next = current.current + (gap > 0 ? step : -step)
         write(display, DDCKIT_VCP_BRIGHTNESS, next)
-        if next == wanted {
-            ramping.remove(key)
-        }
     }
 
     /// Some links never carry a reply: a Dell U3225QE on the Mac's HDMI port

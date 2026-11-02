@@ -71,6 +71,58 @@ struct ProfileTests {
         #expect(book.names == ["DELL"])
     }
 
+    @Test func theSameMonitorOnAnotherCableKeepsItsSettings() {
+        // A monitor reports a different EDID on each input, so its key changes.
+        let hdmi = Display(id: 1, name: "DELL", edidUUID: "uuid-dell-hdmi")
+        let displayPort = Display(id: 1, name: "DELL", edidUUID: "uuid-dell-dp")
+        var book = ProfileBook()
+        _ = book.arrive(at: [hdmi], with: settings(sensor: "desk"))
+        let arrival = book.arrive(at: [displayPort], with: settings(sensor: "desk"))
+        #expect(arrival?.settings.sourceSensor == "desk")
+        #expect(book.names == ["DELL"], "one name in the list, as one monitor")
+    }
+
+    @Test func comingBackToAMonitorByAnotherRouteUsesItsSettingsNotTheLastRooms() {
+        let hdmi = Display(id: 1, name: "DELL", edidUUID: "uuid-dell-hdmi")
+        let displayPort = Display(id: 1, name: "DELL", edidUUID: "uuid-dell-dp")
+        var book = ProfileBook()
+        _ = book.arrive(at: [hdmi], with: settings(sensor: "desk"))
+        _ = book.arrive(at: [bedroom], with: settings(sensor: "desk"))
+        let arrival = book.arrive(at: [displayPort], with: settings(sensor: "bedside"))
+        #expect(arrival?.settings.sourceSensor == "desk")
+    }
+
+    @Test func aMonitorThatChangesCableAsAnotherLeavesIsStillTheSameRoom() {
+        // Two monitors, then one of them alone on another input.
+        let hdmi = Display(id: 1, name: "DELL", edidUUID: "uuid-dell-hdmi")
+        var book = ProfileBook()
+        _ = book.arrive(at: [dell, lenovo], with: settings(sensor: "desk"))
+        let arrival = book.arrive(at: [hdmi], with: settings(sensor: "desk"))
+        #expect(arrival?.settings.sourceSensor == "desk")
+    }
+
+    @Test func twoUnitsOfOneModelInTwoRoomsCanDiffer() {
+        let home = Display(id: 1, name: "DELL", edidUUID: "uuid-home")
+        let office = Display(id: 1, name: "DELL", edidUUID: "uuid-office")
+        var book = ProfileBook()
+        _ = book.arrive(at: [home], with: settings(sensor: "home"))
+        _ = book.arrive(at: [office], with: settings(sensor: "home"))
+        // Told once here that the sensor differs, each keeps its own from then on.
+        let back = book.arrive(at: [home], with: settings(sensor: "office"))
+        #expect(back?.settings.sourceSensor == "home")
+        let again = book.arrive(at: [office], with: settings(sensor: "home"))
+        #expect(again?.settings.sourceSensor == "office")
+    }
+
+    @Test func aBookFromAnOlderVersionKeepsItsProfiles() throws {
+        // Written before some later setting existed: that setting takes its default.
+        let older = #"{"activeKey":"uuid-dell","profiles":{"uuid-dell":{"monitors":["DELL"],"settings":{"sourceSensor":"desk"}}}}"#
+        let book = try JSONDecoder().decode(ProfileBook.self, from: Data(older.utf8))
+        #expect(book.activeName == "DELL")
+        #expect(book.settings(named: "DELL")?.sourceSensor == "desk")
+        #expect(book.settings(named: "DELL")?.rampBrightness == true)
+    }
+
     @Test func aBookSurvivesBeingSaved() throws {
         var book = ProfileBook()
         _ = book.arrive(at: [dell], with: settings(sensor: "desk"))

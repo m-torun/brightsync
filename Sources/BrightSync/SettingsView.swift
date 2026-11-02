@@ -54,6 +54,13 @@ private struct BrightnessPane: View {
 
     var body: some View {
         Form {
+            if let profile = model.profileName {
+                LabeledContent("Profile:") { Text(profile) }
+                LabeledContent("") {
+                    Note("Everything on this tab and the Color tab is remembered for this combination of monitors, and comes back when you connect them again.")
+                        .padding(.bottom, 4)
+                }
+            }
             Toggle("Sync brightness", isOn: $model.isEnabled)
             Picker("Follow:", selection: $model.source) {
                 Text("Main display (automatic)").tag(AppModel.Source.mainDisplay)
@@ -85,6 +92,18 @@ private struct BrightnessPane: View {
                 Toggle("Smooth small changes", isOn: $model.smoothLight)
                 LabeledContent("") {
                     Note("Follows the light averaged over the last 5 minutes, so small changes do not keep nudging the monitors. A change of more than fourfold, such as a lamp switched on, applies at once.")
+                        .padding(.bottom, 4)
+                }
+                Toggle("Ramp brightness gradually", isOn: $model.rampBrightness)
+                Picker("Ramp speed:", selection: $model.rampSeconds) {
+                    ForEach(Preferences.rampChoices, id: \.self) { seconds in
+                        Text("1% every \(seconds) seconds").tag(seconds)
+                    }
+                }
+                .fixedSize()
+                .disabled(!model.rampBrightness)
+                LabeledContent("") {
+                    Note("Monitors drift to a new brightness in small steps. A change of 15 points or more applies at once, and so does moving a slider.")
                         .padding(.bottom, 4)
                 }
                 Toggle("Adjust monitors together", isOn: $model.adjustTogether)
@@ -230,6 +249,15 @@ private struct GeneralPane: View {
                     }
                     Button("Sync Now") { model.syncNow() }
                         .padding(.top, 4)
+                }
+            }
+            if !model.profileNames.isEmpty {
+                LabeledContent("Profiles:") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.profileNames, id: \.self) { name in
+                            Text(name == model.profileName ? "\(name) (current)" : name)
+                        }
+                    }
                 }
             }
             LabeledContent("Log:") {

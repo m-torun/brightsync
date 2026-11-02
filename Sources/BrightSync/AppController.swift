@@ -49,6 +49,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             model.ambient.refresh()
         }
 
+        if let profile = model.profileName {
+            menu.addItem(disabledItem(profile))
+        }
         if model.followsSensor {
             // The slider captions say when changes are held back.
             let keys: [String?] = model.adjustTogether ? [nil] : model.displays.map(\.key)

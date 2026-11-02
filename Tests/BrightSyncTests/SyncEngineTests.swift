@@ -501,6 +501,225 @@ final class SyncEngineTests {
         #expect(!logged.contains { $0.contains("does not answer") }, "its own range, not an assumed one")
     }
 
+    // MARK: - Ramping
+
+    /// Following a sensor with ramping on, both displays at 50.
+    func startRamp(every seconds: TimeInterval = 10) {
+        settings.followsSensor = true
+        settings.rampInterval = seconds
+        engine.receiveAmbient(50, exact: false)
+        settleAndSync()
+        bus.reset()
+    }
+
+    var writes: [String] {
+        bus.transactions.filter { $0.hasPrefix("write") }
+    }
+
+    @Test func aSmallChangeArrivesOnePercentAtATimeAndStops() {
+        startRamp()
+        bus.panels.removeLast()
+        gate.record(.reconfigured)
+        clock.advance(60)
+        engine.tick()
+        bus.reset()
+        engine.receiveAmbient(53, exact: false)
+        for _ in 0..<6 {
+            engine.tick()
+            clock.advance(10)
+        }
+        #expect(bus.transactions == ["write Dell \(brightness)=51", "write Dell \(brightness)=52", "write Dell \(brightness)=53"])
+    }
+
+    @Test func rampingDownWorksTooAndDisplaysMoveTogether() {
+        startRamp()
+        engine.receiveAmbient(48, exact: false)
+        engine.tick()
+        clock.advance(10)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=49", "write Lenovo \(brightness)=49",
+                                     "write Dell \(brightness)=48", "write Lenovo \(brightness)=48"])
+    }
+
+    @Test func readingsArrivingOftenDoNotSpeedUpARamp() {
+        startRamp()
+        engine.receiveAmbient(60, exact: false)
+        for _ in 0..<9 {
+            engine.tick()
+            clock.advance(1)
+        }
+        #expect(writes == ["write Dell \(brightness)=51", "write Lenovo \(brightness)=51"])
+        #expect(engine.nextDelay()! <= 1.01)
+    }
+
+    @Test func aRampEndsAtTheTargetDespiteTheDeadband() {
+        startRamp()
+        engine.receiveAmbient(52, exact: false)
+        engine.tick()
+        clock.advance(10)
+        engine.tick()
+        #expect(bus["Dell"].brightness.current == 52)
+        bus.reset()
+        clock.advance(10)
+        engine.tick()
+        #expect(bus.transactions.isEmpty)
+        #expect(engine.nextDelay() == settings.interval, "no timer once it has arrived")
+    }
+
+    @Test func aChangeWithinTheDeadbandStartsNoRamp() {
+        startRamp()
+        engine.receiveAmbient(51, exact: false)
+        engine.tick()
+        #expect(bus.transactions.isEmpty)
+    }
+
+    @Test func aRoundIsPlannedForTheNextStep() {
+        startRamp(every: 5)
+        engine.receiveAmbient(60, exact: false)
+        engine.tick()
+        #expect(engine.nextDelay() == 5)
+        clock.advance(2)
+        #expect(engine.nextDelay() == 3)
+    }
+
+    @Test func aGapOfFifteenPointsAppliesAtOnce() {
+        startRamp()
+        engine.receiveAmbient(65, exact: false)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=65", "write Lenovo \(brightness)=65"])
+    }
+
+    @Test func aGapJustBelowThatRamps() {
+        startRamp()
+        engine.receiveAmbient(64, exact: false)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=51", "write Lenovo \(brightness)=51"])
+    }
+
+    @Test func theStepIsOnePercentOfEachDisplaysRange() {
+        bus["Lenovo"].brightness = (100, 200)
+        startRamp()
+        engine.receiveAmbient(52, exact: false)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=51", "write Lenovo \(brightness)=102"])
+    }
+
+    @Test func theSliderSkipsTheRampEvenWithANewerReadingBehindIt() {
+        startRamp()
+        engine.receiveAmbient(58, exact: true)
+        engine.receiveAmbient(57, exact: false)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=57", "write Lenovo \(brightness)=57"])
+        bus.reset()
+        engine.receiveAmbient(59, exact: false)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=58", "write Lenovo \(brightness)=58"], "only that once")
+    }
+
+    @Test func aRampCarriesOnAfterAWakeWithoutARead() {
+        startRamp()
+        gate.record(.screensSlept)
+        gate.record(.screensWoke)
+        engine.receiveAmbient(55, exact: false)
+        clock.advance(60)
+        engine.tick()
+        #expect(bus.transactions == ["write Dell \(brightness)=51", "write Lenovo \(brightness)=51"])
+    }
+
+    @Test func aDisplayThatNeverAnswersStillRamps() {
+        bus["Lenovo"].garbled = [brightness]
+        startRamp()
+        clock.advance(30)
+        engine.tick() // the second unusable reply: written to without reading from now on
+        bus.reset()
+        engine.receiveAmbient(53, exact: false)
+        clock.advance(10)
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=51", "write Lenovo \(brightness)=51"])
+    }
+
+    @Test func aCallHoldsARampAndItCarriesOnAfter() {
+        startRamp()
+        engine.receiveAmbient(60, exact: false)
+        engine.tick()
+        bus.reset()
+        call.isOn = true
+        clock.advance(600)
+        engine.tick()
+        #expect(bus.transactions.isEmpty)
+        call.isOn = false
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=52", "write Lenovo \(brightness)=52"])
+    }
+
+    @Test func aRampThatCannotBeWrittenDoesNotSpin() {
+        startRamp()
+        bus["Dell"].asleep = true
+        bus["Lenovo"].asleep = true
+        engine.receiveAmbient(60, exact: false)
+        engine.tick()
+        #expect(bus.transactions.isEmpty)
+        #expect(engine.nextDelay()! >= 0.1)
+        clock.advance(100)
+        engine.tick()
+        #expect(engine.nextDelay()! >= 0.1)
+    }
+
+    @Test func turningTheRampOffGoesStraightToTheTarget() {
+        startRamp()
+        engine.receiveAmbient(60, exact: false)
+        engine.tick()
+        bus.reset()
+        settings.rampInterval = nil
+        engine.tick()
+        #expect(writes == ["write Dell \(brightness)=60", "write Lenovo \(brightness)=60"])
+        #expect(engine.nextDelay() == settings.interval)
+    }
+
+    @Test func aFollowerOfADisplayDoesNotRamp() {
+        settings.rampInterval = 10
+        settleAndSync()
+        bus.reset()
+        bus["Dell"].brightness.current = 58
+        engine.tick()
+        #expect(writes == ["write Lenovo \(brightness)=58"])
+    }
+
+    // MARK: - Waiting for a profile
+
+    @Test func nothingIsSentUntilTheNewMonitorsProfileIsApplied() {
+        var seen: [[String]] = []
+        engine.onDisplaysSettled = { seen.append($0.map(\.name)) }
+        settings.followsSensor = true
+        engine.receiveAmbient(70, exact: false)
+        settleAndSync()
+        engine.tick()
+        #expect(seen == [["Dell", "Lenovo"]])
+        #expect(bus.transactions.isEmpty)
+        engine.receiveAmbient(40, exact: false)
+        engine.resumeRounds()
+        #expect(writes == ["write Dell \(brightness)=40", "write Lenovo \(brightness)=40"])
+    }
+
+    @Test func onlyAChangeInTheMonitorsAsksForAProfile() {
+        var count = 0
+        engine.onDisplaysSettled = { [unowned self] _ in
+            count += 1
+            engine.resumeRounds()
+        }
+        settleAndSync()
+        gate.record(.screensSlept)
+        gate.record(.screensWoke)
+        clock.advance(60)
+        engine.tick()
+        #expect(count == 1)
+        bus.panels.removeLast()
+        gate.record(.reconfigured)
+        clock.advance(60)
+        engine.tick()
+        #expect(count == 2)
+    }
+
     // MARK: - Per-monitor targets
 
     @Test func eachMonitorCanHaveItsOwnTarget() {

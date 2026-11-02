@@ -21,6 +21,9 @@ enum Preferences {
         static let displayRanges = "displayBrightnessRanges"
         static let knownDisplays = "knownDisplays"
         static let smoothLight = "smoothLight"
+        static let rampBrightness = "rampBrightness"
+        static let rampSeconds = "rampSeconds"
+        static let profileBook = "roomProfiles"
     }
 
     /// How often the source display is read. Every read goes through the
@@ -122,6 +125,53 @@ enum Preferences {
     static var smoothLight: Bool {
         get { defaults.object(forKey: Key.smoothLight) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.smoothLight) }
+    }
+
+    /// Seconds per 1% step on offer. Every step is a DDC write, so the floor
+    /// is deliberately not lower.
+    static let rampChoices = [3, 5, 10, 20, 30]
+
+    /// Move brightness towards a sensor's target in 1% steps. On by default.
+    static var rampBrightness: Bool {
+        get { defaults.object(forKey: Key.rampBrightness) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.rampBrightness) }
+    }
+
+    static var rampSeconds: Int {
+        get { max(rampChoices[0], defaults.object(forKey: Key.rampSeconds) as? Int ?? 10) }
+        set { defaults.set(newValue, forKey: Key.rampSeconds) }
+    }
+
+    /// The settings remembered for each combination of monitors.
+    static var profileBook: ProfileBook {
+        get {
+            defaults.data(forKey: Key.profileBook).flatMap { try? JSONDecoder().decode(ProfileBook.self, from: $0) } ?? ProfileBook()
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: Key.profileBook) }
+    }
+
+    /// The settings in use now, which belong to the active profile. They stay
+    /// in their own keys, and are copied to and from a profile on a switch.
+    static var roomSettings: ProfileSettings {
+        get {
+            let offsets = self.offsets
+            return ProfileSettings(sourceDisplay: sourceDisplay, sourceSensor: sourceSensor, colorSource: colorSource,
+                                   isEnabled: isEnabled, syncColor: syncColorTemperature, interval: interval,
+                                   offsetsTogether: offsets.together, sharedOffset: offsets.shared, displayOffsets: offsets.perDisplay,
+                                   smoothLight: smoothLight, rampBrightness: rampBrightness, rampSeconds: rampSeconds)
+        }
+        set {
+            sourceDisplay = newValue.sourceDisplay
+            sourceSensor = newValue.sourceSensor
+            colorSource = newValue.colorSource
+            isEnabled = newValue.isEnabled
+            syncColorTemperature = newValue.syncColor
+            interval = newValue.interval
+            offsets = BrightnessOffsets(together: newValue.offsetsTogether, shared: newValue.sharedOffset, perDisplay: newValue.displayOffsets)
+            smoothLight = newValue.smoothLight
+            rampBrightness = newValue.rampBrightness
+            rampSeconds = newValue.rampSeconds
+        }
     }
 
     /// Send nothing while any app uses the camera or microphone. On by default.

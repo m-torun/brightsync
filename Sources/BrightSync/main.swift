@@ -125,6 +125,11 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
         "brightnessOffset": 10.0,
         "displayBrightnessOffsets": ["uuid-dell": 10.0, "uuid-lenovo": -5.0],
     ]
+    var book = ProfileBook()
+    _ = book.arrive(at: [Display(id: 3, name: "LG HDR 4K", edidUUID: "uuid-lg")], with: ProfileSettings())
+    _ = book.arrive(at: [Display(id: 1, name: "DELL U3225QE", edidUUID: "uuid-dell"),
+                         Display(id: 2, name: "LEN T27p-10", edidUUID: "uuid-lenovo")], with: ProfileSettings())
+    demo["roomProfiles"] = try? JSONEncoder().encode(book)
     if !following {
         demo["sourceSensorID"] = "demo:desk"
     }

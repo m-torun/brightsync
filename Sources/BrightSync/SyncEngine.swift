@@ -64,6 +64,9 @@ struct SyncSettings {
     var followsSensor = false
     var deadband = 1
     var interval: TimeInterval = 30
+    /// Seconds between 1% steps when following a sensor; nil to go straight
+    /// to each new target.
+    var rampInterval: TimeInterval?
 
     static var current: SyncSettings {
         SyncSettings(isEnabled: Preferences.isEnabled,
@@ -72,7 +75,8 @@ struct SyncSettings {
                      sourceKey: Preferences.sourceDisplay,
                      followsSensor: Preferences.sourceSensor != nil,
                      deadband: Preferences.deadband,
-                     interval: TimeInterval(Preferences.interval))
+                     interval: TimeInterval(Preferences.interval),
+                     rampInterval: Preferences.rampBrightness ? TimeInterval(Preferences.rampSeconds) : nil)
     }
 }
 
@@ -88,6 +92,9 @@ struct SyncSettings {
 /// - a failed transaction is never retried on the spot. That display is left
 ///   alone for a while, twice as long after each further failure.
 ///
+/// Following a sensor, brightness can ramp: small changes arrive in 1% steps,
+/// while a gap of `rampSnap` or more, or a slider being moved, applies at once.
+///
 /// All DDC traffic happens on one serial queue, since a read takes about 100 ms.
 final class SyncEngine {
     static let maxBackoff: TimeInterval = 30 * 60
@@ -95,6 +102,10 @@ final class SyncEngine {
     static let pauseRecheck: TimeInterval = 15
     /// The brightness range assumed for a display that cannot be read.
     static let assumedMaximum = 100
+    /// A gap this large (as a fraction of the range) is not ramped. On the
+    /// default curve 15 points is a fourfold change in light, the same line
+    /// `LightSmoother` draws for a lamp being switched on.
+    static let rampSnap = 0.15
 
     let gate: DisplayGate
     private let bus: DisplayBus
@@ -127,9 +138,28 @@ final class SyncEngine {
     /// The brightness a light sensor asks for.
     private var ambient: AmbientTarget?
     private var ambientRoundPending = false
+    /// A slider moved: the next sensor round goes straight to the target, even
+    /// if a newer reading replaces the target before that round runs.
+    private var exactPending = false
+    /// Displays on their way to a target, by brightness cache key.
+    private var ramping: Set<String> = []
+    private var rampDue = false
+    private var rampStepped = false
+    /// When the displays last took a step together.
+    private var lastRampStep: TimeInterval?
+    /// Last brightness read or written. Unlike `known`, it survives events, so
+    /// a ramp can carry on after a wake without reading the display.
+    private var lastBrightness: [String: Int] = [:]
+    /// The display set last reported, and whether its profile is being applied.
+    private var settledKeys: [String]?
+    private var awaitingProfile = false
     /// The pause last logged, so each one is logged once.
     private var pausedFor: String?
 
+    /// Called on the engine's queue when the set of displays changes, before
+    /// anything is sent to them. No round runs until `resume()` is called, so
+    /// new displays never get the settings of the previous room.
+    var onDisplaysSettled: (([Display]) -> Void)?
     /// Called on the main queue after each round.
     var onStatus: ((SyncStatus) -> Void)?
     /// The last round's status, on the engine's queue.
@@ -164,7 +194,22 @@ final class SyncEngine {
         queue.async {
             self.backoff = [:]
             self.tick()
+            self.planNextRound()
         }
+    }
+
+    /// Ends the wait that `onDisplaysSettled` started.
+    func resume() {
+        queue.async {
+            self.resumeRounds()
+            self.planNextRound()
+        }
+    }
+
+    /// Runs on the queue; the tests call it directly.
+    func resumeRounds() {
+        awaitingProfile = false
+        tick()
     }
 
     /// Sets the brightness to follow a light sensor, or nil when there is no
@@ -186,6 +231,9 @@ final class SyncEngine {
     /// Runs on the queue; the tests call it directly.
     func receiveAmbient(_ target: AmbientTarget?) {
         ambient = target
+        if target?.exact == true {
+            exactPending = true
+        }
     }
 
     /// The same target for every display.
@@ -199,7 +247,11 @@ final class SyncEngine {
         case .held: return nil
         case .paused: return Self.pauseRecheck
         case let .settling(remaining): return remaining + 0.1
-        case .open: return settledGeneration == gate.generation ? settings().interval : 0
+        case .open:
+            guard settledGeneration == gate.generation else { return 0 }
+            let interval = settings().interval
+            guard !ramping.isEmpty, let step = settings().rampInterval, let last = lastRampStep else { return interval }
+            return min(interval, max(last + step - now(), 0.1))
         }
     }
 
@@ -236,10 +288,14 @@ final class SyncEngine {
             pausedFor = nil
         }
         guard state == .open else { return }
-        round = settings()
-        aborted = false
         if settledGeneration != gate.generation {
             settle()
+        }
+        guard !awaitingProfile else { return }
+        round = settings()
+        aborted = false
+        if !round.isEnabled || !round.followsSensor || round.rampInterval == nil {
+            ramping = []
         }
         var status = SyncStatus()
         defer { publish(status) }
@@ -288,11 +344,28 @@ final class SyncEngine {
             return false
         }
         guard let ambient else {
+            ramping = []
             status.message = "Waiting for a light reading"
             return false
         }
+        let exact = exactPending
+        let rampInterval = exact ? nil : round.rampInterval
+        if exact {
+            ramping = []
+        }
+        // One clock for every display, so they move together, and however
+        // many readings arrive a ramp keeps its pace.
+        rampDue = rampInterval.map { interval in lastRampStep.map { now() >= $0 + interval - 0.05 } ?? true } ?? false
+        rampStepped = false
         for display in displays {
-            follow(display, fraction: ambient.percent(for: display) / 100, deadband: ambient.exact ? 0 : round.deadband, writeBlind: true)
+            follow(display, fraction: ambient.percent(for: display) / 100, deadband: exact ? 0 : round.deadband,
+                   writeBlind: true, ramp: rampInterval != nil)
+        }
+        if rampStepped {
+            lastRampStep = now()
+        }
+        if !aborted {
+            exactPending = false
         }
         return true
     }
@@ -325,8 +398,12 @@ final class SyncEngine {
     /// Brightness is continuous and each panel has its own range, so the
     /// proportion is what is matched, not the raw value. A display is read
     /// once after it settles; after that, only written to.
-    private func follow(_ display: Display, fraction: Double, deadband: Int, writeBlind: Bool = false) {
+    private func follow(_ display: Display, fraction: Double, deadband: Int, writeBlind: Bool = false, ramp: Bool = false) {
         let key = cacheKey(display, DDCKIT_VCP_BRIGHTNESS)
+        if ramp, known[key] == nil, let max = ranges[key], let last = lastBrightness[key] {
+            // Back from an event: ramp on from where it was left, unread.
+            known[key] = (last, max)
+        }
         if writeBlind, known[key] == nil, let max = ranges[key] {
             // A sensor sets the target, so after an event the display most
             // likely needs it anyway: one write, and no read first that
@@ -338,11 +415,38 @@ final class SyncEngine {
         }
         if let current = read(display, DDCKIT_VCP_BRIGHTNESS, fresh: false) {
             let wanted = Int((fraction * Double(current.max)).rounded())
-            if abs(current.current - wanted) > deadband {
+            if ramp {
+                rampStep(display, current: current, wanted: wanted, deadband: deadband)
+            } else if abs(current.current - wanted) > deadband {
                 write(display, DDCKIT_VCP_BRIGHTNESS, wanted)
             }
         } else if let max = unreadableRange(display) {
             write(display, DDCKIT_VCP_BRIGHTNESS, Int((fraction * Double(max)).rounded()))
+        }
+    }
+
+    /// Takes one 1% step when one is due. The deadband decides whether a ramp
+    /// starts; once under way it runs right up to the target.
+    private func rampStep(_ display: Display, current: (current: Int, max: Int), wanted: Int, deadband: Int) {
+        let key = cacheKey(display, DDCKIT_VCP_BRIGHTNESS)
+        let gap = wanted - current.current
+        if gap == 0 || (abs(gap) <= deadband && !ramping.contains(key)) {
+            ramping.remove(key)
+            return
+        }
+        if Double(abs(gap)) / Double(current.max) >= Self.rampSnap {
+            ramping.remove(key)
+            write(display, DDCKIT_VCP_BRIGHTNESS, wanted)
+            return
+        }
+        ramping.insert(key)
+        guard rampDue else { return }
+        rampStepped = true
+        let step = min(max(1, Int((Double(current.max) / 100).rounded())), abs(gap))
+        let next = current.current + (gap > 0 ? step : -step)
+        write(display, DDCKIT_VCP_BRIGHTNESS, next)
+        if next == wanted {
+            ramping.remove(key)
         }
     }
 
@@ -368,9 +472,16 @@ final class SyncEngine {
         displays = bus.enumerate()
         known = [:]
         unsupported = []
+        ramping = []
         settledGeneration = gate.generation
         let names = displays.isEmpty ? "no DDC-capable displays" : displays.map(\.name).joined(separator: ", ")
         log("displays settled: \(names)")
+        let keys = displays.map(\.key).sorted()
+        if keys != settledKeys, let onDisplaysSettled {
+            settledKeys = keys
+            awaitingProfile = true
+            onDisplaysSettled(displays)
+        }
     }
 
     /// Picks the configured source, falling back to the main display.
@@ -403,9 +514,12 @@ final class SyncEngine {
             backoff[display.key] = nil
             readBackoff[key] = nil
             known[key] = (current, max)
-            if vcp == DDCKIT_VCP_BRIGHTNESS, ranges[key] != max {
-                ranges[key] = max
-                saveRanges(ranges)
+            if vcp == DDCKIT_VCP_BRIGHTNESS {
+                lastBrightness[key] = current
+                if ranges[key] != max {
+                    ranges[key] = max
+                    saveRanges(ranges)
+                }
             }
             return (current, max)
         case .unsupported:
@@ -429,6 +543,9 @@ final class SyncEngine {
         }
         backoff[display.key] = nil
         let key = cacheKey(display, vcp)
+        if vcp == DDCKIT_VCP_BRIGHTNESS {
+            lastBrightness[key] = value
+        }
         if let max = known[key]?.max ?? (vcp == DDCKIT_VCP_BRIGHTNESS ? ranges[key] : nil) {
             known[key] = (value, max)
         }

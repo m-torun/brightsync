@@ -25,6 +25,9 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
+        engine.onDisplaysSettled = { [weak self] displays in
+            DispatchQueue.main.async { self?.arrive(at: displays) }
+        }
         engine.onStatus = { [weak self] status in
             self?.status = status
             let seen = status.readings.map { (key: $0.key, name: $0.name) }
@@ -49,6 +52,36 @@ final class AppModel: ObservableObject {
         self.events = events
         ambient.start()
         engine.schedule()
+    }
+
+    // MARK: - Profiles
+
+    /// Saves the settings of the room just left and loads those of this one,
+    /// then lets the engine carry on.
+    private func arrive(at displays: [Display]) {
+        var book = Preferences.profileBook
+        let before = book.activeKey
+        let arrival = book.arrive(at: displays, with: Preferences.roomSettings)
+        Preferences.profileBook = book
+        if let arrival {
+            Preferences.roomSettings = arrival.settings
+            ambient.update()
+        }
+        if book.activeKey != before, let name = book.activeName {
+            Log.write("profile: \(name)" + (arrival?.isNew == false ? " (remembered)" : " (new)"))
+        }
+        objectWillChange.send()
+        engine.resume()
+    }
+
+    /// The monitors the current settings belong to.
+    var profileName: String? {
+        Preferences.profileBook.activeName
+    }
+
+    /// Every remembered combination of monitors.
+    var profileNames: [String] {
+        Preferences.profileBook.names
     }
 
     // MARK: - Settings
@@ -110,6 +143,24 @@ final class AppModel: ObservableObject {
             objectWillChange.send()
             Preferences.smoothLight = newValue
             ambient.update()
+        }
+    }
+
+    var rampBrightness: Bool {
+        get { Preferences.rampBrightness }
+        set {
+            objectWillChange.send()
+            Preferences.rampBrightness = newValue
+            engine.syncNow()
+        }
+    }
+
+    var rampSeconds: Int {
+        get { Preferences.rampSeconds }
+        set {
+            objectWillChange.send()
+            Preferences.rampSeconds = newValue
+            engine.schedule()
         }
     }
 

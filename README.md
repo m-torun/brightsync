@@ -12,6 +12,10 @@ screen — and you want the rest of the desk to match.
   sensor that reports light through Zigbee2MQTT) through a brightness curve
   you shape from the menu (see
   [Following an ambient light sensor](#following-an-ambient-light-sensor))
+- Brightness ramps to a sensor's target in 1% steps instead of jumping (see
+  [Ramping](#ramping))
+- Remembers your settings for each combination of monitors (see
+  [Profiles](#profiles))
 - Optionally mirrors the color preset (color temperature) as well
 - The source can be any connected display, not just the main one
 - Checks every 10 seconds to 2 minutes (your choice; 30 seconds by default)
@@ -69,24 +73,48 @@ allow it once under System Settings → Privacy & Security → **Open Anyway**.
 ## Using it
 
 A sun icon appears in the menu bar. The menu is kept short: what brightness is
-following (with brightness sliders when that is a light sensor), switches for
+following (with brightness sliders when that is a light sensor), the current
+profile, switches for
 **Sync brightness** and **Sync color**, and **Settings…**. Opening the app
 again while it runs also opens Settings.
 
 The Settings window holds the rest, in four tabs:
 
-- **Brightness:** what brightness follows (a display or a light sensor), how
-  often a source display is checked, and, for a sensor, the light, the
-  default for it and the offset sliders, together or per monitor.
+- **Brightness:** the current profile, what brightness follows (a display or
+  a light sensor), how often a source display is checked, and, for a sensor,
+  the light, the default for it, smoothing, ramping and the offset sliders,
+  together or per monitor.
 - **Color:** whether to copy the color preset, and from which display.
 - **Sensors:** the light sensors BrightSync knows, and **Add Sensor** to set
   one up.
 - **General:** **Start at login**, **Pause during calls**, the displays and
-  their current brightness, and the log.
+  their current brightness, the remembered profiles, and the log.
 
 The first line of the menu says when BrightSync is holding off, for example
 `Paused: displays asleep` or `Waiting for displays to settle (42 s)`. It waits
 a minute after launch before talking to any display.
+
+## Profiles
+
+BrightSync keeps one profile for each combination of monitors, named after
+them, such as `DELL U3225QE + LEN T27p-10`. There is nothing to create or pick:
+when the connected monitors change, it saves the settings of the combination
+you left and loads the ones for the combination you are at, before sending
+anything to the monitors.
+
+A profile holds what brightness and color follow (so each room can have its
+own sensor), the offsets, smoothing, ramping, the check interval, and the
+**Sync brightness** and **Sync color** switches. The sensors you have added,
+**Start at login** and **Pause during calls** apply everywhere.
+
+A combination seen for the first time starts from the current settings. If it
+shares a monitor with the one you left, it is taken to be the same room with a
+monitor switched away, and keeps the sensor. If it shares none, it is a new
+room: brightness follows the main display until you choose a sensor there,
+since the last room's sensor would be measuring the wrong light. When no
+monitors are found at all, the current profile stays. Monitors are told apart
+by EDID UUID, so a different monitor of the same model is a different
+combination.
 
 ## Checking what it sees
 
@@ -150,6 +178,27 @@ last 5 minutes, weighted by how long each reading held, so small changes ramp
 in gently and wobbles cancel out. A reading more than four times brighter or
 darker than the average, such as a lamp switched on at night, replaces the
 average and applies at once.
+
+### Ramping
+
+Smoothing evens out the light, but each change in brightness would still be a
+visible step. With **Ramp brightness gradually** (Settings → Brightness, on by
+default), the monitors move 1% at a time, every 10 seconds unless you choose
+another **Ramp speed**, from every 3 to every 30 seconds. A display with a
+range other than 0–100 moves by 1% of its range, so monitors stay in step.
+
+A gap of 15 points or more applies at once: on the default curve that is the
+same fourfold change in light that smoothing treats as a lamp being switched
+on, and it also covers coming back to a room whose light changed while the
+screens slept. Moving a slider applies at once too. Ramping only applies to
+following a sensor; a display that follows another display matches it
+directly, since keeping the two equal is the point.
+
+Each step is a DDC write. A 14-point change is 14 writes per monitor rather
+than one, a cost monitors can bear at this pace, but one to weigh if you choose
+a fast ramp: see [How it works](#how-it-works) on write cycles. The rules in
+[Staying out of the way](#staying-out-of-the-way) cover every step, and a ramp
+held up by a call or a sleep carries on afterwards.
 
 ### Brighter or dimmer than the default
 
@@ -245,8 +294,9 @@ nothing at all.
 When following a light sensor there are no periodic reads at all. Each
 display is read once, the first time it is seen, to learn its brightness
 range, which is remembered across wakes and launches. After that a new target
-is a single write, sent only when it moves by more than a point (by any amount
-when you move the slider). A slider being
+is sent only when it moves by more than a point (by any amount when you move
+the slider), as one write, or as one write per 1% while [ramping](#ramping). A
+slider being
 dragged is coalesced into at most one round every tenth of a second.
 
 All DDC traffic runs on a background queue; a single read takes roughly 100 ms.
@@ -299,7 +349,8 @@ hot corner, a keyboard shortcut), so a transaction already under way, about
 
 Settings are stored in your own `UserDefaults` under
 `app.brightsync.BrightSync` (source display or sensor, interval, enabled,
-deadband, color temperature syncing, your brightness curves, the last
+deadband, color temperature syncing, your brightness curves, ramping, the
+profiles for each combination of monitors, under `roomProfiles`, the last
 address of each Hue bridge, and the Zigbee2MQTT servers you added, under
 `zigbee2mqttServers`). Hue keys are in your login Keychain under
 "BrightSync Hue".
